@@ -1,0 +1,9 @@
+[workspace]
+resolver = "3"
+
+members = [
+    "apps/crawler-rs",
+    "apps/indexer-rs",
+    "apps/search-rs",
+    "apps/api-rs"
+]

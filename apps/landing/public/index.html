@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vertex &mdash; Moteur de recherche personnel</title>
+<meta name="description" content="Vertex : un moteur de recherche personnel, l&eacute;ger et gratuit. Crawle le web, nettoie les contenus, recherche plein texte et interface native.">
+<style>
+  :root { --primary:#6c5ce7; --primary-dark:#4a3bd0; --accent:#00b894; --bg:#eef0fa; --card:#fff; --text:#16181d; --muted:#6b7280; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,'Segoe UI',Roboto,sans-serif; background:var(--bg); color:var(--text); line-height:1.6; }
+  .hero { background:radial-gradient(1200px 500px at 50% -60px,#7c6cf0,#5948d6); color:#fff; text-align:center; padding:4rem 1rem 5rem; }
+  .hero .logo { font-size:3rem; font-weight:800; }
+  .hero .logo span { color:#ffe08a; }
+  .hero p { max-width:620px; margin:.8rem auto 1.6rem; opacity:.95; font-size:1.15rem; }
+  .btn { display:inline-block; padding:.85rem 1.6rem; border-radius:12px; font-size:1rem; font-weight:600; text-decoration:none; cursor:pointer; border:0; transition:transform .1s, box-shadow .1s; }
+  .btn:hover { transform:translateY(-2px); box-shadow:0 8px 22px rgba(0,0,0,.2); }
+  .btn.download { background:#fff; color:var(--primary-dark); }
+  .btn.ghost { background:rgba(255,255,255,.15); color:#fff; border:1px solid rgba(255,255,255,.35); margin-top:1rem; }
+  main { max-width:920px; margin:-2.5rem auto 3rem; padding:0 1rem; }
+  .card { background:var(--card); border-radius:14px; padding:1.5rem 1.8rem; margin:1rem 0; box-shadow:0 2px 10px rgba(30,20,90,.08); }
+  .card h2 { margin-top:0; }
+  .features { display:flex; flex-wrap:wrap; gap:1rem; }
+  .feature { flex:1 1 220px; background:var(--card); border-radius:12px; padding:1.2rem; box-shadow:0 1px 4px rgba(0,0,0,.06); }
+  .feature .ico { font-size:1.6rem; }
+  .feature b { display:block; margin:.4rem 0 .2rem; }
+  footer { text-align:center; color:var(--muted); font-size:.85rem; padding:2rem 1rem 2.5rem; }
+  .dl-a { color:var(--primary-dark); }
+</style>
+</head>
+<body>
+<div class="hero">
+  <div class="logo">&#x1F577; Vertex<span>.</span></div>
+  <p>Votre moteur de recherche personnel &mdash; crawle le web, nettoie les contenus, recherche plein texte, en local et gratuit.</p>
+  <a class="btn download" href="#download">&#x2B07; T&eacute;l&eacute;charger pour Windows</a>
+</div>
+
+<main>
+  <div class="card" id="download">
+    <h2>&#x2B07; T&eacute;l&eacute;chargement</h2>
+    <p><b>Vertex Desktop</b> &mdash; application Windows native (Tauri) : recherche, crawl int&eacute;gr&eacute; et interface moderne.</p>
+    <p><a class="dl-a" href="/downloads/Vertex_0.1.0_x64-setup.exe?v=2" target="_blank" rel="noopener"><b>Vertex_0.1.0_x64-setup.exe</b></a> &middot; installeur Windows (NSIS, ~5,6 Mo)</p>
+    <p class="note">Le logiciel est gratuit et open source.</p>
+  </div>
+
+  <div class="card" id="about">
+    <h2>&Agrave; propos</h2>
+    <p>Vertex est un moteur de recherche construit en <b>Rust</b>. Il rassemble l'exploration web (crawler, le nettoyage du contenu, l'indexation plein texte ( FTS5) et une interface native, le tout <b>en local</b> et <b>sans suivi</b>.</p>
+  </div>
+
+  <h2 style="margin-top:2rem">Fonctionnalit&eacute;s</h2>
+  <div class="features">
+    <div class="feature"><span class="ico">&#x1F577;</span><b>Crawler multi-sites</b>Explore le web (liens externes, multi-thread.</div>
+    <div class="feature"><span class="ico">&#x1F9F9;</span><b>Contenu nettoy&eacute;</b>M&eacute;tadonn&eacute;es, navigation, pubs et scripts supprim&eacute;s.</div>
+    <div class="feature"><span class="ico">&#x1F50D;</span><b>Recherche FTS5</b>Plein texte index&eacute;, classement par pertinence.</div>
+    <div class="feature"><span class="ico">&#x1F4BB;</span><b>Application native</b>Windows .exe + version web, donn&eacute;es 100% locales.</div>
+  </div>
+</main>
+
+<footer>&#x1F577; Vertex &middot; gratuit et open source &middot; les donn&eacute;es restent sur votre machine</footer>
+</body>
+</html>

@@ -1,0 +1,14 @@
+/target
+target/
+/database/
+*.db
+*.db-shm
+*.db-wal
+Thumbs.db
+.DS_Store
+.cline/
+.vscode/
+*.log
+*.tmp
+*.bak
+apps/landing/public/downloads/

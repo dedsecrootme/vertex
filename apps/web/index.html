@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vertex — Recherche</title>
+<style>
+  :root { --primary: #6c5ce7; --primary-dark: #4a3bd0; --accent: #00b894; --bg: #eef0fa; --card: #fff; --text: #16181d; --muted: #6b7280; --line: #e6e8f0; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); }
+  a { color: inherit; }
+  .hero { background: radial-gradient(1200px 400px at 50% -50px, #7c6cf0, #5948d6); color: #fff; padding: 2.2rem 1rem 3rem; text-align: center; }
+  .hero .logo { font-size: 2rem; font-weight: 800; }
+  .hero .logo span { color: #ffe08a; }
+  .hero p { margin: .3rem 0 1.2rem; opacity: .92; }
+  .search { display: flex; justify-content: center; gap: .6rem; max-width: 680px; margin: 0 auto; }
+  .search input { flex: 1; padding: .85rem 1.1rem; font-size: 1.05rem; border: 0; border-radius: 12px; box-shadow: 0 6px 20px rgba(30,20,90,.25); }
+  .search button { padding: .85rem 1.5rem; font-size: 1rem; border: 0; border-radius: 12px; background: var(--primary-dark); color: #fff; cursor: pointer; }
+  .chips { margin-top: 1rem; display: flex; flex-wrap: wrap; justify-content: center; gap: .5rem; }
+  .chip { background: rgba(255,255,255,.18); color: #fff; border: 1px solid rgba(255,255,255,.3); padding: .35rem .9rem; border-radius: 999px; cursor: pointer; font-size: .85rem; }
+  main { max-width: 820px; margin: -1.4rem auto 2rem; padding: 0 1rem; }
+  .toolbar { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: .6rem .9rem; margin-bottom: .8rem; display: flex; align-items: center; gap: .8rem; flex-wrap: wrap; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+  .toolbar .spacer { flex: 1; }
+  .meta { color: var(--muted); font-size: .85rem; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 1rem 1.15rem; margin-top: .9rem; box-shadow: 0 1px 3px rgba(0,0,0,.06); transition: transform .08s, box-shadow .08s; }
+  .card:hover { transform: translateY(-2px); box-shadow: 0 8px 22px rgba(30,20,90,.1); }
+  .row { display: flex; align-items: center; gap: .6rem; }
+  .fav { width: 26px; height: 26px; border-radius: 6px; background: #f1f2f6; flex: none; display: grid; place-items: center; overflow: hidden; }
+  .fav img { width: 100%; height: 100%; object-fit: cover; }
+  .domain { font-size: .8rem; color: var(--muted); background: #f1f2f6; border-radius: 5px; padding: .15rem .5rem; }
+  .card h2 { margin: .5rem 0 .25rem; font-size: 1.12rem; }
+  .card h2 a { color: var(--primary); text-decoration: none; }
+  .snippet { margin: .15rem 0 .7rem; color: var(--muted); line-height: 1.55; font-size: .95rem; }
+  mark { background: #ffe08a; color: inherit; border-radius: 2px; padding: 0 1px; }
+  .actions { display: flex; gap: .5rem; flex-wrap: wrap; }
+  .btn { border: 0; border-radius: 8px; padding: .45rem .85rem; font-size: .85rem; cursor: pointer; }
+  .btn.primary { background: var(--primary); color: #fff; }
+  .btn.ghost { background: #eef0f7; color: var(--text); }
+  .btn.warn { background: #fff3e0; color: #b26a00; }
+  .btn.warn:hover { background: #ffe9c9; }
+  .more { display: block; margin: 1.3rem auto 0; padding: .7rem 1.6rem; }
+  .empty { text-align: center; color: var(--muted); margin-top: 3rem; }
+  footer { text-align: center; color: var(--muted); font-size: .8rem; padding: 2rem 1rem 1rem; }
+  #view { position: fixed; inset: 0; background: rgba(15,15,30,.6); display: none; justify-content: center; align-items: flex-start; padding: 2.5rem 1rem; overflow: auto; backdrop-filter: blur(2px); }
+  #view.open { display: flex; }
+  #view .sheet { background: #fff; max-width: 860px; width: 100%; border-radius: 16px; padding: 1.6rem 2rem; position: relative; box-shadow: 0 24px 60px rgba(0,0,0,.3); }
+  #view .close { position: absolute; top: 1rem; right: 1.2rem; background: transparent; border: 0; font-size: 1.4rem; cursor: pointer; color: var(--muted); }
+  #view .top { display: flex; align-items: center; gap: .7rem; margin-bottom: .6rem; }
+  #view h2 { margin: 0; }
+  #view .url { color: var(--primary); word-break: break-all; }
+  #view pre { white-space: pre-wrap; word-wrap: break-word; font-family: inherit; line-height: 1.75; max-height: 60vh; overflow: auto; }
+</style>
+</head>
+<body>
+<div class="hero">
+  <div class="logo">🕷️ Vertex<span>.</span></div>
+  <p>Moteur de recherche personnel — contenu crawlé, nettoyé et indexé</p>
+  <form class="search" id="searchForm">
+    <input id="q" type="search" placeholder="Rechercher un sujet, un site…" autofocus>
+    <button type="submit">Rechercher</button>
+  </form>
+  <div class="chips" id="chips">
+    <button class="chip" data-q="rust">Rust</button>
+    <button class="chip" data-q="performance">Performance</button>
+    <button class="chip" data-q="python">Python</button>
+    <button class="chip" data-q="web">Web</button>
+    <button class="chip" data-q="security">Sécurité</button>
+  </div>
+</div>
+
+<main>
+  <div class="toolbar" id="toolbar" style="display:none">
+    <strong>⚙️ Crawler</strong>
+    <button class="btn primary" id="crawlBtn">Lancer un crawl (30 s)</button>
+    <span class="spacer"></span>
+    <span class="meta" id="crawlState">Pages : 0 · échecs : 0 · en attente : 0</span>
+  </div>
+  <div id="meta" class="meta"></div>
+  <div id="results"></div>
+  <button id="more" class="btn ghost more" style="display:none">Charger plus</button>
+</main>
+
+<footer>🕷️ Vertex · moteur de recherche personnel</footer>
+
+<div id="view">
+  <div class="sheet">
+    <button class="close" onclick="closeView()">✕</button>
+    <div class="top"><div class="fav" id="vFav"></div><h2 id="vTitle"></h2></div>
+    <p><a class="url" id="vUrl" target="_blank" rel="noopener"></a> <span id="vMeta"></span></p>
+    <pre id="vContent"></pre>
+  </div>
+</div>
+
+<script>
+const SCAM_CHECK = "https://transparencyreport.google.com/safe-browsing/search?url=";
+const $ = s => document.querySelector(s);
+const inTauri = typeof window !== 'undefined' && !!window.__TAURI__ && !!window.__TAURI__.core && !!window.__TAURI__.core.invoke;
+const esc = s => (s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const escReg = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const domain = u => { try { return new URL(u).hostname; } catch(e){ return u; } };
+const favicon = u => 'https://www.google.com/s2/favicons?domain=' + encodeURIComponent(domain(u)) + '&sz=32';
+
+async function call(method, params) {
+  if (inTauri) return await window.__TAURI__.core.invoke(method, params || {});
+  if (method === 'search') {
+    const r = await fetch('/api/search?' + new URLSearchParams({ q: (params.query||''), offset: String(params.offset||0) }));
+    return await r.json();
+  }
+  if (method === 'page') {
+    const r = await fetch('/api/page?' + new URLSearchParams({ url: (params.url||'') }));
+    return await r.json();
+  }
+  return null;
+}
+
+function highlight(text, terms) {
+  let html = esc(text);
+  (terms || []).filter(Boolean).forEach(t => { const re = new RegExp(escReg(esc(t)), 'gi'); html = html.replace(re, m => '<mark>' + m + '</mark>'); });
+  return html;
+}
+
+let currentQuery = '';
+let loaded = 0;
+
+async function doSearch(q, append) {
+  const list = $('#results');
+  if (!append) { loaded = 0; list.innerHTML = '<p class="empty">Recherche…</p>'; }
+  const data = await call('search', { query: q, offset: loaded });
+  const results = Array.isArray(data) ? data : (data.results || []);
+  const terms = q.split(/\s+/);
+  if (!append) list.innerHTML = '';
+  if (!append && results.length === 0) { list.innerHTML = '<p class="empty">Aucun résultat pour « ' + esc(q) + ' ».</p>'; $('#meta').textContent=''; $('#more').style.display='none'; return; }
+  for (const r of results) {
+    const d = domain(r.url);
+    const card = document.createElement('article');
+    card.className = 'card';
+    card.innerHTML = `
+      <div class="row"><div class="fav"><img src="${favicon(r.url)}" alt="" onerror="this.style.display='none'"></div><span class="domain">${esc(d)}</span></div>
+      <h2><a href="${esc(r.url)}" target="_blank" rel="noopener">${highlight(r.title, terms)}</a></h2>
+      <p class="snippet">${highlight(r.snippet, terms)}</p>
+      <div class="actions">
+        <button class="btn primary">👁️ Lire</button>
+        <a class="btn ghost" href="${esc(r.url)}" target="_blank" rel="noopener">Ouvrir le site</a>
+        <a class="btn warn" href="${SCAM_CHECK}${encodeURIComponent(r.url)}" target="_blank" rel="noopener">⚠️ Scam ?</a>
+      </div>
+    `;
+    card.querySelector('.btn.primary').onclick = () => openPage(r.url);
+    list.appendChild(card);
+  }
+  loaded += results.length;
+  $('#meta').textContent = loaded + ' résultat(s) pour « ' + q + ' »';
+  $('#more').style.display = results.length >= 30 ? '' : 'none';
+}
+
+$('#searchForm').addEventListener('submit', e => { e.preventDefault(); run($('#q').value.trim()); });
+document.querySelectorAll('.chip').forEach(c => c.addEventListener('click', () => { $('#q').value = c.dataset.q; run(c.dataset.q); }));
+$('#more').addEventListener('click', () => doSearch(currentQuery, true));
+
+function run(q) {
+  if (!q) { $('#meta').textContent = 'Saisissez un terme.'; $('#results').innerHTML=''; return; }
+  currentQuery = q;
+  doSearch(q, false);
+}
+
+async function openPage(url) {
+  const pg = await call('page', { url });
+  if (!pg) { alert('Page introuvable.'); return; }
+  const terms = currentQuery.split(/\s+/);
+  $('#vFav').innerHTML = `<img src="${favicon(pg.url)}" alt="" onerror="this.style.display='none'">`;
+  $('#vTitle').textContent = pg.title || '(sans titre)';
+  $('#vUrl').textContent = pg.url;
+  $('#vUrl').href = pg.url;
+  $('#vMeta').textContent = pg.status_code ? '· HTTP ' + pg.status_code : '';
+  $('#vContent').innerHTML = highlight(pg.content || '(aucun contenu enregistré)', terms);
+  $('#view').classList.add('open');
+}
+
+function closeView() { $('#view').classList.remove('open'); }
+
+if (inTauri) {
+  $('#toolbar').style.display = 'flex';
+  $('#crawlBtn').addEventListener('click', () => {
+    call('crawl', { duration: 30 }).then(() => refreshStats());
+  });
+  function refreshStats() {
+    call('stats', {}).then(s => { $('#crawlState').textContent = 'Pages : ' + (s.done||0) + ' · échecs : ' + (s.failed||0) + ' · en attente : ' + (s.pending||0); });
+  }
+  setInterval(refreshStats, 3000);
+}
+
+$('#q').focus();
+</script>
+</body>
+</html>
