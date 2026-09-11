@@ -1,61 +1,44 @@
 # Vertex
 
-Moteur de recherche personnel ÃƒÆ’Ã‚Â©crit en Rust. Ce projet est un workspace Cargo
-organisÃƒÆ’Ã‚Â© en plusieurs binaires liÃƒÆ’Ã‚Â©s entre eux via une base SQLite.
+Moteur de recherche personnel écrit en Rust : crawler multi-sites, contenu nettoyé,
+recherche plein texte (SQLite FTS5), serveur web (axum) et application desktop native (Tauri).
 
-## Structure
+## Composants
+- `apps/crawler-rs` : crawler (lib) + CLI. Suit les liens externes, multi-thread, budget de temps.
+- `apps/search-rs` : bibliothèque de recherche FTS5 (BM25) + récupération de contenu.
+- `apps/api-rs` : serveur HTTP (axum) servant l'interface web et l'API.
+- `apps/desktop` : app Windows native (Tauri) — interface + bouton Crawler en arrière-plan.
+- `apps/web` : interface web (HTML/JS) double mode (Tauri ou navigateur).
+- `apps/landing` : page de présentation déployée sur Vercel.
+- `database/` : base SQLite (`vertex.db`).
 
-- `apps/crawler-rs` : crawler web (tÃƒÆ’Ã‚Â©lÃƒÆ’Ã‚Â©charge, analyse et stocke les pages).
-- `apps/search-rs` : bibliothÃƒÆ’Ã‚Â¨que de recherche (titre + contenu, snippets).
-- `apps/indexer-rs` : (ÃƒÆ’Ã‚Â  implÃƒÆ’Ã‚Â©menter) indexation avancÃƒÆ’Ã‚Â©e.
-- `apps/api-rs` : serveur HTTP (axum) ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â recherche, contenu et page web.
-- `apps/web` : interface web (HTML/JS) embarquÃƒÆ’Ã‚Â©e dans le binaire `api-rs`.
-- `database/` : base SQLite locale (`vertex.db`).
+## Téléchargement
+- Landing : https://landing-gamma-dun-83.vercel.app
+- Release GitHub : https://github.com/dedsecrootme/vertex/releases
 
-## PrÃƒÆ’Ã‚Â©requis
-
-- Rust (ÃƒÆ’Ã‚Â©dition 2024) : `rustc`/`cargo` >= 1.85.
-
-## Build
-
+## Build & exécution
 ```sh
-cargo build
-```
+# workspace (crawler/search/api)
+cargo build --workspace
 
-## Crawler
-
-Crawl les pages et remplit la base (sauvegarde le contenu texte) :
-
-```sh
+# crawler CLI (300 s par défaut)
 cargo run -p crawler-rs
-```
 
-## Serveur web (moteur de recherche)
-
-Lance le serveur, puis ouvre `http://127.0.0.1:3000` dans un navigateur :
-
-```sh
+# serveur web sur 127.0.0.1:3000
 cargo run -p api-rs
+
+# app desktop (installeurs dans target/release/bundle/)
+cd apps/desktop/src-tauri && cargo tauri build
+
+# landing (déploiement Vercel)
+cd apps/landing && vercel deploy --prod --yes
 ```
 
-### Endpoints
+## Outils
+`just` (task runner, commandes build/web/desktop/deploy) et `cargo-watch` (redev). Voir le `justfile`.
 
-- `GET /` : page web de recherche.
-- `GET /api/search?q=terme&offset=n` : recherche plein texte (JSON), paginÃƒÂ© par `offset`.
-- `GET /api/page?url=ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦` : contenu complet d'une page (JSON).
-- `GET /health` : ÃƒÆ’Ã‚Â©tat du serveur.
+La base de l'app desktop est stockée dans `%APPDATA%\Vertex` (writable) ; le crawl écrit
+dans la même base.
 
-## Application desktop (Tauri)
-
-Une application **Windows native** (Tauri v2) qui embarque l'interface de
-recherche et un bouton **Â« Crawler Â»** (crawl en arriÃ¨re-plan).
-
-```sh
-cd apps/desktop/src-tauri
-cargo build        # produit target/debug/desktop.exe
-# installateur optimisÃ© :
-# cargo tauri build    # release : installeurs + desktop.exe optimisÃ© (voir ci-dessous)
-```
 ## Licence
-
-Voir le fichier `LICENSE`.
+MIT — voir `LICENSE`.

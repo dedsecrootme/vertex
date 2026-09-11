@@ -71,7 +71,13 @@
 <main>
   <div class="toolbar" id="toolbar" style="display:none">
     <strong>⚙️ Crawler</strong>
-    <button class="btn primary" id="crawlBtn">Lancer un crawl (30 s)</button>
+    <button class="btn primary" id="crawlBtn">🌐 Crawler le web</button>
+    <select id="durSel" style="border-radius:8px;border:1px solid var(--line);padding:.45rem .6rem;background:#fff">
+      <option value="600">10 min</option>
+      <option value="1800">30 min</option>
+      <option value="7200" selected>2 h</option>
+      <option value="36000">10 h</option>
+    </select>
     <span class="spacer"></span>
     <span class="meta" id="crawlState">Pages : 0 · échecs : 0 · en attente : 0</span>
   </div>
@@ -180,7 +186,8 @@ function closeView() { $('#view').classList.remove('open'); }
 if (inTauri) {
   $('#toolbar').style.display = 'flex';
   $('#crawlBtn').addEventListener('click', () => {
-    call('crawl', { duration: 30 }).then(() => refreshStats());
+    const dur = parseInt($('#durSel').value, 10) || 3600;
+    call('crawl', { duration: dur }).then(() => refreshStats());
   });
   function refreshStats() {
     call('stats', {}).then(s => { $('#crawlState').textContent = 'Pages : ' + (s.done||0) + ' · échecs : ' + (s.failed||0) + ' · en attente : ' + (s.pending||0); });

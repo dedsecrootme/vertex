@@ -12,3 +12,5 @@ Thumbs.db
 *.tmp
 *.bak
 apps/landing/public/downloads/
+apps/landing/.vercel/
+apps/desktop/src-tauri/gen/

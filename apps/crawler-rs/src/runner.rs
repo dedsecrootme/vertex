@@ -23,9 +23,15 @@ pub struct CrawlSummary {
 }
 
 /// Lance un crawl multi-thread pendant `duration_secs` secondes et renvoie
-/// un résumé une fois terminé.
+/// un résumé une fois terminé. Dossier de base = celui par défaut (workspace).
 pub fn run_crawl(duration_secs: u64, seeds: &[&str]) -> CrawlSummary {
-    let db = database::init().expect("❌ Impossible d'ouvrir SQLite");
+    run_crawl_in(&database::default_db_dir(), duration_secs, seeds)
+}
+
+/// Variante `run_crawl` dans un dossier de base explicite (utilisé par l'app
+/// desktop pour écrire dans `%APPDATA%\\Vertex`).
+pub fn run_crawl_in(db_dir: &std::path::Path, duration_secs: u64, seeds: &[&str]) -> CrawlSummary {
+    let db = database::init_in(db_dir).expect("❌ Impossible d'ouvrir SQLite");
     let db = Arc::new(Mutex::new(db));
 
     database::reset_crawling(&db.lock().unwrap()).expect("❌ reset");

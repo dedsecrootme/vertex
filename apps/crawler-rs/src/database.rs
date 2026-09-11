@@ -16,8 +16,13 @@ fn workspace_root() -> PathBuf {
         .to_path_buf()
 }
 
+/// Dossier de base par défaut (workspace `database/`), utilisé par le CLI/web.
+pub fn default_db_dir() -> PathBuf {
+    workspace_root().join("database")
+}
+
 pub fn init() -> Result<Connection> {
-    let db_dir = workspace_root().join("database");
+    let db_dir = default_db_dir();
     init_in(&db_dir)
 }
 
