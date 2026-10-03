@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use reqwest::blocking::Client;
 use rusqlite::{Connection, OptionalExtension};
 
-use crate::{crawler, database, safety};
+use crate::{crawler, database, robots, safety};
 
 /// Configuration d'une session de crawl.
 #[derive(Debug, Clone)]
@@ -62,105 +62,13 @@ pub struct CrawlSummary {
 }
 
 /// Règles `robots.txt` d'un domaine.
-#[derive(Debug, Clone, Default)]
-struct RobotsRules {
-    crawl_delay_ms: Option<u64>,
-    disallow: Vec<String>,
-    allow: Vec<String>,
-    sitemaps: Vec<String>,
-}
+/// L'implémentation complète et conforme (RFC 9309 : jokers `*`/`$`, règle du
+/// plus long match, groupe d'agent le plus spécifique) vit dans [`crate::robots`].
+type RobotsRules = robots::Rules;
 
-impl RobotsRules {
-    fn allows(&self, path_query: &str) -> bool {
-        let mut best_len = -1isize;
-        let mut allowed = true;
-        for rule in &self.allow {
-            if !rule.is_empty() && path_query.starts_with(rule.as_str()) && rule.len() as isize > best_len
-            {
-                best_len = rule.len() as isize;
-                allowed = true;
-            }
-        }
-        for rule in &self.disallow {
-            if !rule.is_empty() && path_query.starts_with(rule.as_str()) && rule.len() as isize > best_len
-            {
-                best_len = rule.len() as isize;
-                allowed = false;
-            }
-        }
-        allowed
-    }
-}
-
-/// Analyse un `robots.txt` en retenant les règles du groupe le plus spécifique
-/// (`VertexCrawler`) puis, à défaut, du groupe `*`.
+/// Analyse un `robots.txt` pour l'agent Vertex (RFC 9309).
 fn parse_robots(body: &str) -> RobotsRules {
-    let mut specific = RobotsRules::default();
-    let mut wildcard = RobotsRules::default();
-    let mut sitemaps = Vec::new();
-    let mut current: Option<bool> = None; // Some(true) = spécifique, Some(false) = wildcard
-
-    for raw in body.lines() {
-        let line = raw.split('#').next().unwrap_or("").trim();
-        if line.is_empty() {
-            continue;
-        }
-        let Some((key, value)) = line.split_once(':') else {
-            continue;
-        };
-        let key = key.trim().to_ascii_lowercase();
-        let value = value.trim();
-
-        match key.as_str() {
-            "user-agent" => {
-                let v = value.to_ascii_lowercase();
-                current = if v == "*" {
-                    Some(false)
-                } else if v.contains("vertex") {
-                    Some(true)
-                } else {
-                    None
-                };
-            }
-            "disallow" | "allow" if current.is_some() => {
-                let target = if current == Some(true) {
-                    &mut specific
-                } else {
-                    &mut wildcard
-                };
-                if key == "disallow" {
-                    target.disallow.push(value.to_string());
-                } else {
-                    target.allow.push(value.to_string());
-                }
-            }
-            "crawl-delay" if current.is_some() => {
-                if let Ok(secs) = value.parse::<f64>() {
-                    let ms = (secs * 1000.0).round() as u64;
-                    let target = if current == Some(true) {
-                        &mut specific
-                    } else {
-                        &mut wildcard
-                    };
-                    target.crawl_delay_ms = Some(ms);
-                }
-            }
-            "sitemap" => sitemaps.push(value.to_string()),
-            _ => {}
-        }
-    }
-
-    let mut rules = if specific.disallow.is_empty() && specific.allow.is_empty() && specific.crawl_delay_ms.is_none()
-    {
-        wildcard
-    } else {
-        if specific.crawl_delay_ms.is_none() {
-            specific.crawl_delay_ms = wildcard.crawl_delay_ms;
-        }
-        specific
-    };
-    rules.sitemaps = sitemaps;
-    rules
+    robots::parse(body, &crawler::user_agent())
 }
 
 /// État partagé par tous les workers.

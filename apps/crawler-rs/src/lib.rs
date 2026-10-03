@@ -12,6 +12,7 @@ pub mod crawler;
 pub mod database;
 pub mod models;
 pub mod parser;
+pub mod robots;
 pub mod runner;
 pub mod safety;
 
