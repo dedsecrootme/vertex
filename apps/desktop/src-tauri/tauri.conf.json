@@ -10,7 +10,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "Vertex â€” Moteur de recherche",
+        "title": "Vertex — Moteur de recherche",
         "width": 1100,
         "height": 760,
         "resizable": true,

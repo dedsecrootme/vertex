@@ -1,25 +1,38 @@
-use crawler_rs::{runner::run_crawl, SEEDS};
+use crawler_rs::runner::{run_crawl_with, CrawlConfig};
+use crawler_rs::{database, SEEDS};
 
-const CRAWL_SECONDS: u64 = 300;
-
+/// Durée du crawl lancé en ligne de commande (secondes), surchargeable par
+/// l'argument 1 (ex. `cargo run -p crawler-rs -- 600`).
 fn main() {
-    println!("============================================");
-    println!("🕷️ Vertex Crawler v{}", env!("CARGO_PKG_VERSION"));
-    println!("⏱️ Durée : {CRAWL_SECONDS}s");
-    println!("============================================");
+    let duration: u64 = std::env::args()
+        .nth(1)
+        .and_then(|a| a.parse().ok())
+        .unwrap_or(300);
 
+    println!("============================================");
+    println!("Vertex Crawler v{}", env!("CARGO_PKG_VERSION"));
+    println!("Duree : {duration}s");
+    println!("============================================");
     for seed in SEEDS {
-        println!("➕ Seed : {seed}");
+        println!("Seed : {seed}");
     }
 
-    println!("🏁 Démarrage du crawl…");
-    let summary = run_crawl(CRAWL_SECONDS, SEEDS);
+    let cfg = CrawlConfig {
+        duration_secs: duration,
+        ..CrawlConfig::default()
+    };
+
+    println!("Demarrage du crawl...");
+    let summary = run_crawl_with(&database::default_db_dir(), SEEDS, cfg);
 
     println!();
     println!("============================================");
-    println!("✅ Crawl terminé en {}s", summary.elapsed_secs);
-    println!("📄 Pages traitées : {} (OK), {} (échec)", summary.pages_ok, summary.pages_failed);
-    println!("🌍 Sites (domaines) distincts : {}", summary.sites);
-    println!("📥 URLs encore en file : {}", summary.pending);
+    println!("Crawl termine en {}s", summary.elapsed_secs);
+    println!("Pages OK      : {}", summary.pages_ok);
+    println!("Pages echouees: {}", summary.pages_failed);
+    println!("Pages bloquees: {} (malveillantes)", summary.pages_blocked);
+    println!("Pages ignorees: {}", summary.pages_skipped);
+    println!("Domaines      : {}", summary.sites);
+    println!("Encore en file: {}", summary.pending);
     println!("============================================");
 }

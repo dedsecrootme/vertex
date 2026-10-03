@@ -5,5 +5,9 @@ members = [
     "apps/crawler-rs",
     "apps/indexer-rs",
     "apps/search-rs",
-    "apps/api-rs"
+    "apps/api-rs",
+    "apps/hub-rs",
+    "apps/vx-sys",
+    "apps/vx-vault",
+    "apps/vx-mail"
 ]

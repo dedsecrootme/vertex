@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vertex — Communauté</title>
+<style>
+  :root{--p:#6c5ce7;--pd:#4a3bd0;--ok:#00b894;--bg:#eef0fa;--card:#fff;--tx:#16181d;--mut:#6b7280;--ln:#e6e8f0;--dg:#d63031}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--tx)}
+  header{background:radial-gradient(900px 300px at 50% -120px,#7c6cf0,#5948d6);color:#fff;padding:1.4rem 1rem 1.8rem;text-align:center}
+  header .logo{font-size:1.7rem;font-weight:800}header .logo span{color:#ffe08a}
+  header p{margin:.3rem 0 0;opacity:.9;font-size:.9rem}
+  main{max-width:900px;margin:-1rem auto 2rem;padding:0 1rem}
+  .card{background:var(--card);border:1px solid var(--ln);border-radius:14px;padding:1rem 1.15rem;margin-top:.9rem}
+  .row{display:flex;gap:.6rem;align-items:center;flex-wrap:wrap}
+  .sp{flex:1}
+  .tabs{display:flex;gap:.4rem;flex-wrap:wrap;margin:.6rem 0}
+  .tab{border:1px solid var(--ln);background:var(--card);border-radius:999px;padding:.4rem 1rem;cursor:pointer;font-size:.9rem}
+  .tab.on{background:var(--p);color:#fff;border-color:var(--p)}
+  .btn{border:0;border-radius:8px;padding:.45rem .85rem;font-size:.85rem;cursor:pointer;background:#eef0f7;color:var(--tx)}
+  .btn.p{background:var(--p);color:#fff}
+  .btn.d{background:#ffe3e3;color:var(--dg)}
+  input,textarea,select{padding:.55rem .7rem;border:1px solid var(--ln);border-radius:10px;font:inherit;background:#fff;width:100%}
+  .mut{color:var(--mut);font-size:.85rem}
+  #msgs{height:340px;overflow:auto;border:1px solid var(--ln);border-radius:10px;padding:.7rem;background:#fafbff}
+  .msg{margin-bottom:.45rem;line-height:1.5}
+  .msg b{color:var(--pd)}
+  .topic{border-bottom:1px solid var(--ln);padding:.5rem 0}
+  .stars{color:#f1c40f;font-size:1.2rem;letter-spacing:2px}
+  .ad{border:1px dashed var(--p);border-radius:12px;padding:.7rem .9rem;margin-top:.6rem}
+  .warn{background:#fff8e1;border:1px solid #ffe08a;border-radius:10px;padding:.6rem .8rem;font-size:.85rem}
+  a{color:var(--pd)}
+  footer{text-align:center;color:var(--mut);font-size:.78rem;padding:1.5rem 1rem}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">🕷️ Vertex<span>.</span> Communauté</div>
+  <p>Chat en direct · forums · avis · partenaires — hébergé par vous</p>
+</header>
+<main>
+  <div class="card" id="authCard">
+    <div class="row">
+      <span id="who" class="mut">Non connecté</span>
+      <span class="sp"></span>
+      <button class="btn" id="btnLogin">Se connecter</button>
+      <button class="btn p" id="btnRegister">Créer un compte</button>
+      <button class="btn d" id="btnLogout" style="display:none">Déconnexion</button>
+    </div>
+    <div id="authForms" style="display:none;margin-top:.7rem">
+      <div class="row">
+        <input id="aUser" placeholder="pseudo" style="max-width:220px">
+        <input id="aPass" type="password" placeholder="mot de passe (10+ caractères)" style="max-width:280px">
+        <button class="btn p" id="aGo">Valider</button>
+      </div>
+      <p class="mut" id="authMsg" style="margin:.5rem 0 0"></p>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <button class="tab on" data-tab="chat">💬 Chat</button>
+    <button class="tab" data-tab="forum">🗂️ Forums</button>
+    <button class="tab" data-tab="reviews">⭐ Avis</button>
+    <button class="tab" data-tab="ads">📣 Partenaires</button>
+  </div>
+
+  <section id="p-chat">
+    <div class="card">
+      <div class="row">
+        <select id="rooms" style="max-width:240px"></select>
+        <span class="sp"></span>
+        <span class="mut" id="chatState"></span>
+      </div>
+      <div id="msgs"></div>
+      <div class="row" style="margin-top:.6rem">
+        <input id="chatInput" placeholder="Votre message…">
+        <button class="btn p" id="chatSend">Envoyer</button>
+      </div>
+    </div>
+  </section>
+
+  <section id="p-forum" style="display:none">
+    <div class="card" id="forumCard"></div>
+  </section>
+
+  <section id="p-reviews" style="display:none">
+    <div class="card" id="reviewsCard"></div>
+  </section>
+
+  <section id="p-ads" style="display:none">
+    <div class="card" id="adsCard"></div>
+  </section>
+</main>
+<footer>🕷️ Vertex · communauté locale · aucun tracker, aucune publicité tierce</footer>
+
+<script>
+"use strict";
+const $ = s => document.querySelector(s);
+const esc = s => (s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let me = null;
+let currentRoom = 'general';
+let lastMsgId = 0;
+let currentTopic = null;
+
+async function api(method, path, body) {
+  const options = { method, headers: {} };
+  if (body !== undefined) { options.headers['Content-Type'] = 'application/json'; options.body = JSON.stringify(body); }
+  const r = await fetch(path, options);
+  let data = null;
+  try { data = await r.json(); } catch (e) { data = null; }
+  if (!r.ok) throw new Error((data && data.error) || ('HTTP ' + r.status));
+  return data;
+}
+
+// --- Comptes -------------------------------------------------------------
+async function refreshMe() {
+  try {
+    const data = await api('GET', '/api/me');
+    me = data && data.user ? data.user : null;
+  } catch (e) { me = null; }
+  $('#who').textContent = me ? ('Connecté : ' + me.username + (me.role === 'admin' ? ' (admin)' : '')) : 'Non connecté';
+  $('#btnLogin').style.display = me ? 'none' : '';
+  $('#btnRegister').style.display = me ? 'none' : '';
+  $('#btnLogout').style.display = me ? '' : 'none';
+}
+
+let authMode = 'login';
+function showAuth(mode) {
+  authMode = mode;
+  $('#authForms').style.display = '';
+  $('#aGo').textContent = mode === 'login' ? 'Se connecter' : 'Créer le compte';
+  $('#authMsg').textContent = '';
+}
+async function doAuth() {
+  const username = $('#aUser').value.trim();
+  const password = $('#aPass').value;
+  try {
+    await api('POST', authMode === 'login' ? '/api/login' : '/api/register', { username, password });
+    $('#aPass').value = '';
+    $('#authForms').style.display = 'none';
+    await refreshMe();
+    loadAll();
+  } catch (e) { $('#authMsg').textContent = '⚠️ ' + e.message; }
+}
+
+// --- Onglets -------------------------------------------------------------
+function showTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('on', t.dataset.tab === name));
+  ['chat','forum','reviews','ads'].forEach(p => { $('#p-' + p).style.display = (p === name) ? '' : 'none'; });
+  if (name === 'forum') loadCategories();
+  if (name === 'reviews') loadReviews();
+  if (name === 'ads') loadAds();
+}
+
+// --- Chat ----------------------------------------------------------------
+async function loadRooms() {
+  const data = await api('GET', '/api/rooms');
+  const sel = $('#rooms');
+  sel.innerHTML = (data.rooms || []).map(r => '<option value="' + esc(r.slug) + '">' + esc(r.name) + '</option>').join('');
+  sel.value = currentRoom;
+  await loadMessages(true);
+}
+
+async function loadMessages(reset) {
+  if (reset) { lastMsgId = 0; $('#msgs').innerHTML = ''; }
+  try {
+    const data = await api('GET', '/api/rooms/' + encodeURIComponent(currentRoom) + '/messages?since=' + lastMsgId);
+    const box = $('#msgs');
+    for (const m of (data.messages || [])) {
+      lastMsgId = Math.max(lastMsgId, m.id);
+      const div = document.createElement('div');
+      div.className = 'msg';
+      div.innerHTML = '<b>' + esc(m.username) + '</b> <span class="mut">' + esc((m.created_at || '').slice(11, 16)) + '</span><br>' + esc(m.body);
+      box.appendChild(div);
+    }
+    if ((data.messages || []).length) box.scrollTop = box.scrollHeight;
+    $('#chatState').textContent = me ? '' : 'Connectez-vous pour écrire';
+    $('#chatInput').disabled = !me;
+    $('#chatSend').disabled = !me;
+  } catch (e) { $('#chatState').textContent = e.message; }
+}
+
+async function sendMessage() {
+  const body = $('#chatInput').value.trim();
+  if (!body) return;
+  try {
+    await api('POST', '/api/rooms/' + encodeURIComponent(currentRoom) + '/messages', { body });
+    $('#chatInput').value = '';
+    await loadMessages(false);
+  } catch (e) { $('#chatState').textContent = '⚠️ ' + e.message; }
+}
+
+// --- Forums --------------------------------------------------------------
+async function loadCategories() {
+  const data = await api('GET', '/api/forum');
+  $('#forumCard').innerHTML = '<h2>🗂️ Forums</h2>' + (data.categories || []).map(c =>
+    '<div class="topic"><a href="#" data-cat="' + esc(c.slug) + '"><b>' + esc(c.name) + '</b></a> ' +
+    '<span class="mut">(' + c.topics + ' sujets)</span><br><span class="mut">' + esc(c.description || '') + '</span></div>'
+  ).join('');
+  $('#forumCard').querySelectorAll('[data-cat]').forEach(a =>
+    a.addEventListener('click', e => { e.preventDefault(); openCategory(a.dataset.cat); }));
+}
+
+async function openCategory(slug) {
+  const data = await api('GET', '/api/forum/' + encodeURIComponent(slug) + '/topics');
+  $('#forumCard').innerHTML =
+    '<button class="btn" id="backCat">← Catégories</button><h2>' + esc(slug) + '</h2>' +
+    ((data.topics || []).length
+      ? data.topics.map(t => '<div class="topic"><a href="#" data-topic="' + t.id + '"><b>' + esc(t.title) +
+          '</b></a> <span class="mut">par ' + esc(t.username) + ' · ' + t.posts + ' messages</span></div>').join('')
+      : '<p class="mut">Aucun sujet pour le moment.</p>') +
+    '<h3>Nouveau sujet</h3><input id="ntTitle" placeholder="Titre">' +
+    '<textarea id="ntBody" rows="3" placeholder="Message" style="margin-top:.5rem"></textarea>' +
+    '<button class="btn p" id="ntGo" style="margin-top:.5rem">Publier</button><p class="mut" id="ntMsg"></p>';
+  $('#backCat').addEventListener('click', loadCategories);
+  $('#forumCard').querySelectorAll('[data-topic]').forEach(a =>
+    a.addEventListener('click', e => { e.preventDefault(); openTopic(a.dataset.topic); }));
+  $('#ntGo').addEventListener('click', async () => {
+    try {
+      await api('POST', '/api/forum/' + encodeURIComponent(slug) + '/topics',
+        { title: $('#ntTitle').value.trim(), body: $('#ntBody').value.trim() });
+      openCategory(slug);
+    } catch (e) { $('#ntMsg').textContent = '⚠️ ' + e.message; }
+  });
+}
+
+async function openTopic(id) {
+  const data = await api('GET', '/api/forum/topic/' + id);
+  const t = data.topic;
+  $('#forumCard').innerHTML =
+    '<button class="btn" id="backCat2">← Forums</button><h2>' + esc(t.title) + '</h2>' +
+    '<div class="topic"><b>' + esc(t.username) + '</b><br>' + esc(t.body) + '</div>' +
+    (data.posts || []).map(p => '<div class="topic"><b>' + esc(p.username) + '</b> <span class="mut">' +
+      esc((p.created_at || '').slice(0, 16)) + '</span><br>' + esc(p.body) + '</div>').join('') +
+    '<textarea id="rpBody" rows="3" placeholder="Votre réponse" style="margin-top:.8rem"></textarea>' +
+    '<button class="btn p" id="rpGo" style="margin-top:.5rem">Répondre</button><p class="mut" id="rpMsg"></p>';
+  $('#backCat2').addEventListener('click', loadCategories);
+  $('#rpGo').addEventListener('click', async () => {
+    try { await api('POST', '/api/forum/topic/' + id + '/reply', { body: $('#rpBody').value.trim() }); openTopic(id); }
+    catch (e) { $('#rpMsg').textContent = '⚠️ ' + e.message; }
+  });
+}
+
+// --- Avis ----------------------------------------------------------------
+async function loadReviews() {
+  const data = await api('GET', '/api/reviews');
+  const s = data.summary;
+  let html = '<h2>⭐ Avis sur Vertex</h2>';
+  if (!s.open) {
+    html += '<div class="warn">Les avis sont <b>réservés aux premiers utilisateurs</b> : encore ' +
+      (s.min_users - s.users) + ' inscrit(s) avant ouverture.</div>';
+  } else {
+    const full = Math.round(s.average);
+    html += '<p><span class="stars">' + '★'.repeat(full) + '☆'.repeat(5 - full) + '</span> <b>' +
+      s.average.toFixed(1) + '/5</b> <span class="mut">(' + s.count + ' avis)</span></p>' +
+      '<div class="row"><select id="rvRate" style="max-width:110px"><option>5</option><option>4</option>' +
+      '<option>3</option><option>2</option><option>1</option></select>' +
+      '<input id="rvCmt" placeholder="Votre avis" style="max-width:400px"><button class="btn p" id="rvGo">Noter</button></div>' +
+      '<p class="mut" id="rvMsg"></p>';
+  }
+  html += (data.reviews || []).map(r => '<div class="topic"><span class="stars">' + '★'.repeat(r.rating) +
+    '☆'.repeat(5 - r.rating) + '</span> <b>' + esc(r.username) + '</b><br>' + esc(r.comment || '') + '</div>').join('');
+  $('#reviewsCard').innerHTML = html;
+  if (s.open) $('#rvGo').addEventListener('click', async () => {
+    try {
+      await api('POST', '/api/reviews', { rating: parseInt($('#rvRate').value, 10), comment: $('#rvCmt').value.trim() });
+      loadReviews();
+    } catch (e) { $('#rvMsg').textContent = '⚠️ ' + e.message; }
+  });
+}
+
+// --- Partenaires ---------------------------------------------------------
+async function loadAds() {
+  const data = await api('GET', '/api/ads');
+  $('#adsCard').innerHTML = '<h2>📣 Partenaires</h2>' +
+    '<p class="mut">Emplacements payants pour serveurs Discord, vérifiés un par un. Aucune régie publicitaire, aucun tracker.</p>' +
+    ((data.ads || []).length
+      ? data.ads.map(a => '<div class="ad"><b>' + esc(a.title) + '</b><br>' + esc(a.description || '') +
+          '<br><a href="' + esc(a.invite_url) + '" target="_blank" rel="noopener noreferrer">Rejoindre le Discord →</a></div>').join('')
+      : '<p class="mut">Aucun partenaire actif.</p>') +
+    '<h3 style="margin-top:1rem">Proposer votre serveur Discord</h3>' +
+    '<input id="adTitle" placeholder="Nom du serveur">' +
+    '<input id="adInvite" placeholder="https://discord.gg/…" style="margin-top:.5rem">' +
+    '<textarea id="adDesc" rows="2" placeholder="Description" style="margin-top:.5rem"></textarea>' +
+    '<button class="btn p" id="adGo" style="margin-top:.5rem">Envoyer la demande</button><p class="mut" id="adMsg"></p>';
+  $('#adGo').addEventListener('click', async () => {
+    try {
+      const r = await api('POST', '/api/ads', {
+        title: $('#adTitle').value.trim(), invite_url: $('#adInvite').value.trim(), description: $('#adDesc').value.trim()
+      });
+      $('#adMsg').textContent = '✅ ' + (r.message || 'Demande envoyée.');
+    } catch (e) { $('#adMsg').textContent = '⚠️ ' + e.message; }
+  });
+}
+
+function loadAll() { loadRooms(); }
+
+(async () => {
+  await refreshMe();
+  await loadRooms();
+  setInterval(() => { if ($('#p-chat').style.display !== 'none') loadMessages(false); }, 3000);
+  setInterval(refreshMe, 60000);
+})();
+
+document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => showTab(t.dataset.tab)));
+$('#btnLogin').addEventListener('click', () => showAuth('login'));
+$('#btnRegister').addEventListener('click', () => showAuth('register'));
+$('#aGo').addEventListener('click', doAuth);
+$('#btnLogout').addEventListener('click', async () => { await api('POST', '/api/logout', {}); await refreshMe(); });
+$('#rooms').addEventListener('change', e => { currentRoom = e.target.value; loadMessages(true); });
+$('#chatSend').addEventListener('click', sendMessage);
+$('#chatInput').addEventListener('keydown', e => { if (e.key === 'Enter') sendMessage(); });
+</script>
+</body>
+</html>

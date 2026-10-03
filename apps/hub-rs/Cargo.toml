@@ -1,0 +1,18 @@
+[package]
+name = "hub-rs"
+version = "0.1.0"
+edition = "2024"
+
+# vx-hub : service communautaire Vertex (chat, forums, avis, partenaires).
+#
+# Dépendances volontairement réduites au minimum :
+#  - rusqlite : stockage (sera remplacé par vx-store, « maison », à terme) ;
+#  - sha2     : primitive de hachage pour PBKDF2 (implémenté à la main ici) ;
+#  - serde/serde_json : sérialisation JSON.
+# Aucune dépendance réseau : le serveur HTTP est écrit à la main (http.rs) et
+# l'aléa cryptographique utilise l'API Windows (BCryptGenRandom) via FFI.
+[dependencies]
+rusqlite = { version = "0.31", features = ["bundled"] }
+sha2 = "0.10"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

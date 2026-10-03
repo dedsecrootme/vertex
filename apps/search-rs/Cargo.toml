@@ -6,3 +6,4 @@ edition = "2024"
 [dependencies]
 rusqlite = { version = "0.31" }
 serde = { version = "1", features = ["derive"] }
+crawler-rs = { path = "../crawler-rs" }
