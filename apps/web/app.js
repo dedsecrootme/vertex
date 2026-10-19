@@ -288,7 +288,12 @@ async function openPage(url) {
   if (html) {
     $('#vBody').innerHTML = html;
   } else {
-    $('#vBody').innerHTML = '<pre style="white-space:pre-wrap;font-family:inherit">' + esc(pg.content || '(aucun contenu enregistré)') + '</pre>';
+    $('#vBody').replaceChildren(...String(pg.content || '(aucun contenu enregistré)').split(/\r?\n\s*\r?\n/).map(text => {
+      const paragraph = document.createElement('p');
+      paragraph.textContent = text;
+      paragraph.style.whiteSpace = 'pre-line';
+      return paragraph;
+    }));
   }
 
   $$('#vBody img[data-src]').forEach(async (img, index) => {

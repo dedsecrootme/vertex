@@ -69,14 +69,12 @@ if($Action -eq 'Start'){
 $lock=$null;$cleanup=$null;$awake=$false
 try{
     $lock=[IO.File]::Open((Join-Path $dir 'supervisor.lock'),[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
-    $previousState=if(Test-Path -LiteralPath $statePath){Get-Content -LiteralPath $statePath -Raw|ConvertFrom-Json}else{$null}
     $script:state=@{pid=$PID;status='starting';database=$dir;profile=$Profile;maxWorkers=$Workers;maxStorageMiB=$maxStorageMiB;minFreeMiB=$minFreeMiB;startedAt=[DateTimeOffset]::Now.ToString('o')}
     Save
     Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class VertexCrawlPower { [DllImport("kernel32.dll")] public static extern uint SetThreadExecutionState(uint flags); }'
     $awake=([VertexCrawlPower]::SetThreadExecutionState([uint32]2147483649) -ne 0)
     $budget=Budget
     $currentWorkers=if($budget.memoryMiB -ge 4096){$Workers}elseif($budget.memoryMiB -ge 2048){[math]::Min($Workers,32)}elseif($budget.memoryMiB -ge 1536){[math]::Min($Workers,16)}elseif($budget.memoryMiB -ge 1024){[math]::Min($Workers,8)}else{[math]::Min($Workers,4)}
-    if($budget.memoryMiB -lt 4096 -and $previousState.profile -eq $Profile -and $previousState.workers -ge 1 -and $previousState.workers -le 64){$currentWorkers=[math]::Min($currentWorkers,[int]$previousState.workers)}
     Launch $currentWorkers
     $node=(Get-Command node).Source
     $deadline=[DateTimeOffset]::Now.AddHours(24).ToString('o')

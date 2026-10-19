@@ -36,6 +36,8 @@ try {
   const index = results.findIndex(row => row.url === reader.url);
   await page.locator('.act-read').nth(index).click();
   await page.getByRole('dialog').waitFor();
+  await page.locator('#vTitle').filter({hasText:reader.title}).waitFor();
+  await page.waitForFunction(() => document.querySelector('#vBody').getAttribute('aria-busy') === 'false');
   await page.screenshot({path:'test-results/candidate-reader-real.png'});
   await page.goto(base + '/panel');
   await page.locator('#content').waitFor({state:'visible'});

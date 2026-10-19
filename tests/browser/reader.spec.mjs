@@ -37,6 +37,20 @@ test('reader displays a recoverable failure instead of an empty page', async ({ 
   await expect(page.locator('#vBody')).toContainText('Document Rust');
 });
 
+test('legacy text is rendered as paragraphs, never code or executable markup', async ({ page }) => {
+  await page.route('**/api/page?*', async route => {
+    const response = await route.fetch();
+    const data = await response.json();
+    data.content_html = '';
+    data.content = 'Document Rust\n\nUn second paragraphe <img src=x onerror=bad()>.';
+    await route.fulfill({ json: data });
+  });
+  await open(page);
+  await expect(page.locator('#vBody p')).toHaveCount(2);
+  await expect(page.locator('#vBody pre, #vBody img')).toHaveCount(0);
+  await expect(page.locator('#vBody p').last()).toContainText('<img src=x onerror=bad()>');
+});
+
 test('long documents scroll as a page, progress works and layout stays bounded', async ({ page }, info) => {
   await page.route('**/api/page?*', async route => {
     const response = await route.fetch();

@@ -98,12 +98,19 @@ fn main() {
 
     for stream in listener.incoming() {
         let Ok(mut stream) = stream else { continue };
-        if active
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
-                (n < 64).then_some(n + 1)
-            })
-            .is_err()
-        {
+        let accepted = loop {
+            let count = active.load(Ordering::Acquire);
+            if count >= 64 {
+                break false;
+            }
+            if active
+                .compare_exchange_weak(count, count + 1, Ordering::AcqRel, Ordering::Acquire)
+                .is_ok()
+            {
+                break true;
+            }
+        };
+        if !accepted {
             let _ = stream.set_write_timeout(Some(std::time::Duration::from_secs(1)));
             write_response(&mut stream, &Response::json_error(503, "serveur occupé"));
             continue;
