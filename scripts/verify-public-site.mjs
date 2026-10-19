@@ -1,10 +1,13 @@
 import { chromium } from '@playwright/test';
 import assert from 'node:assert/strict';
 import { mkdir } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 
 const base = process.argv[2] || 'https://vertex-ded-sec.vercel.app';
 assert.equal(new URL(base).protocol, 'https:');
-await mkdir('test-results', { recursive: true });
+const output = fileURLToPath(new URL('../test-results/', import.meta.url));
+await mkdir(output, { recursive: true });
 const browser = await chromium.launch(process.env.PLAYWRIGHT_CHANNEL ? { channel: process.env.PLAYWRIGHT_CHANNEL } : {});
 try {
   for (const [name, width, height] of [['desktop', 1440, 1000], ['mobile', 390, 844], ['small', 320, 760]]) {
@@ -30,7 +33,7 @@ try {
       await page.waitForTimeout(450);
     }
     await page.evaluate(() => scrollTo(0, 0));
-    await page.screenshot({ path: `test-results/public-${name}.png`, fullPage: true });
+    await page.screenshot({ path: join(output, `public-${name}.png`), fullPage: true });
     assert.deepEqual(errors, []);
     await page.close();
   }

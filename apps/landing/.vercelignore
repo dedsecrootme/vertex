@@ -1,4 +1,6 @@
 .git
+.vercel
+test-results/
 .wrangler
 worker.mjs
 wrangler.jsonc
