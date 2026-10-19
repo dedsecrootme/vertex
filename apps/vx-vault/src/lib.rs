@@ -1,17 +1,18 @@
 //! vx-vault — le **coffre-fort** de Vertex.
 //!
-//! - Mot de passe maître → clé via **PBKDF2-HMAC-SHA256** (CNG, 200 000 itérations) ;
+//! - Mot de passe maître → clé via **PBKDF2-HMAC-SHA256** (CNG, 600 000 itérations) ;
 //! - Secrets chiffrés en **AES-256-GCM** avec **en-tête authentifié** (toute
 //!   altération du fichier — sel, itérations, chiffré — est détectée) ;
 //! - **Génération de mots de passe ultra-longs** (256 bits) ;
 //! - Secrets gardés **en mémoire uniquement**, verrouillage automatique.
 //!
-//! Aucune dépendance : toute la cryptographie vient de `vx-sys` (CNG/Windows).
+//! Cryptography uses `vx-sys` (CNG/Windows); owned secret buffers use zeroize.
 
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
+use zeroize::{Zeroize, Zeroizing};
 
 use vx_sys::cng::{self, AesGcmKey, KEY_LEN, NONCE_LEN, TAG_LEN};
 
@@ -32,7 +33,7 @@ const PASSWORD_ALPHABET: &[u8] =
 /// Coffre-fort déverrouillé.
 pub struct Vault {
     path: PathBuf,
-    key: AesGcmKey,
+    key: Option<AesGcmKey>,
     salt: [u8; SALT_LEN],
     iterations: u64,
     entries: BTreeMap<String, String>,
@@ -52,7 +53,7 @@ impl Vault {
         let key = derive_key(passphrase, &salt, cng::DEFAULT_PBKDF2_ITERATIONS)?;
         let vault = Self {
             path: path.to_path_buf(),
-            key,
+            key: Some(key),
             salt,
             iterations: cng::DEFAULT_PBKDF2_ITERATIONS,
             entries: BTreeMap::new(),
@@ -79,6 +80,9 @@ impl Vault {
         let mut iterations_bytes = [0u8; 8];
         iterations_bytes.copy_from_slice(&raw[9..17]);
         let iterations = u64::from_le_bytes(iterations_bytes);
+        if !(1..=10_000_000).contains(&iterations) {
+            return Err("nombre d'itérations du coffre invalide".into());
+        }
 
         let mut salt = [0u8; SALT_LEN];
         salt.copy_from_slice(&raw[17..17 + SALT_LEN]);
@@ -95,13 +99,14 @@ impl Vault {
         let mut tag = [0u8; TAG_LEN];
         tag.copy_from_slice(&raw[tag_start..]);
 
-        let plaintext = key
-            .decrypt(&nonce, header, ciphertext, &tag)
-            .map_err(|_| "mot de passe maître incorrect ou coffre altéré".to_string())?;
+        let plaintext = Zeroizing::new(
+            key.decrypt(&nonce, header, ciphertext, &tag)
+                .map_err(|_| "mot de passe maître incorrect ou coffre altéré".to_string())?,
+        );
 
         Ok(Self {
             path: path.to_path_buf(),
-            key,
+            key: Some(key),
             salt,
             entries: decode_entries(&plaintext)?,
             iterations,
@@ -117,6 +122,9 @@ impl Vault {
 
     /// Chiffre et écrit le coffre sur disque (écriture atomique via `.tmp`).
     pub fn save(&self) -> Result<(), String> {
+        if self.is_expired() {
+            return Err("coffre verrouillé après inactivité".into());
+        }
         let mut nonce = [0u8; NONCE_LEN];
         nonce.copy_from_slice(&vx_sys::random_bytes(NONCE_LEN));
 
@@ -126,9 +134,11 @@ impl Vault {
         header.extend_from_slice(&self.iterations.to_le_bytes());
         header.extend_from_slice(&self.salt);
 
-        let plaintext = encode_entries(&self.entries);
+        let plaintext = Zeroizing::new(encode_entries(&self.entries));
         let (ciphertext, tag) = self
             .key
+            .as_ref()
+            .ok_or_else(|| "coffre verrouillé".to_string())?
             .encrypt(&nonce, &header, &plaintext)
             .map_err(|e| format!("chiffrement : {e}"))?;
 
@@ -142,8 +152,10 @@ impl Vault {
         {
             let mut file =
                 std::fs::File::create(&temporary).map_err(|e| format!("création : {e}"))?;
-            file.write_all(&out).map_err(|e| format!("écriture : {e}"))?;
-            file.sync_all().ok();
+            file.write_all(&out)
+                .map_err(|e| format!("écriture : {e}"))?;
+            file.sync_all()
+                .map_err(|e| format!("synchronisation : {e}"))?;
         }
         std::fs::rename(&temporary, &self.path).map_err(|e| format!("remplacement : {e}"))?;
         Ok(())
@@ -161,7 +173,7 @@ impl Vault {
         let key = derive_key(passphrase, &salt, iterations)?;
         let vault = Self {
             path: path.to_path_buf(),
-            key,
+            key: Some(key),
             salt,
             iterations,
             entries: BTreeMap::new(),
@@ -176,36 +188,46 @@ impl Vault {
 
     /// Enregistre (ou remplace) un secret et enregistre le coffre.
     pub fn set(&mut self, key: &str, value: &str) -> Result<(), String> {
-        self.touch();
-        self.entries.insert(key.to_string(), value.to_string());
+        self.ensure_unlocked()?;
+        if let Some(mut previous) = self.entries.insert(key.to_string(), value.to_string()) {
+            previous.zeroize();
+        }
         self.save()
     }
 
     /// Lit un secret (met à jour l'horodatage d'activité).
     pub fn get(&mut self, key: &str) -> Option<&str> {
-        self.touch();
+        self.ensure_unlocked().ok()?;
         self.entries.get(key).map(String::as_str)
     }
 
     /// Supprime un secret.
     pub fn remove(&mut self, key: &str) -> Result<(), String> {
-        self.touch();
-        self.entries.remove(key);
+        self.ensure_unlocked()?;
+        if let Some(mut value) = self.entries.remove(key) {
+            value.zeroize();
+        }
         self.save()
     }
 
     /// Noms des secrets stockés (jamais les valeurs).
     pub fn keys(&self) -> Vec<&str> {
+        if self.is_expired() {
+            return Vec::new();
+        }
         self.entries.keys().map(String::as_str).collect()
     }
 
     /// Nombre de secrets.
     pub fn len(&self) -> usize {
+        if self.is_expired() {
+            return 0;
+        }
         self.entries.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.entries.is_empty()
+        self.len() == 0
     }
 
     // --- Mots de passe générés -------------------------------------------
@@ -234,27 +256,64 @@ impl Vault {
 
     /// Réglage du délai de verrouillage automatique.
     pub fn set_auto_lock(&mut self, delay: Duration) {
+        self.touch();
         self.auto_lock = delay;
     }
 
     /// Marque une activité (repousse le verrouillage automatique).
     pub fn touch(&mut self) {
-        self.last_use = Instant::now();
+        if self.is_expired() {
+            self.wipe();
+        } else {
+            self.last_use = Instant::now();
+        }
     }
 
     /// Vrai si le délai d'inactivité est dépassé.
     pub fn is_expired(&self) -> bool {
-        self.last_use.elapsed() >= self.auto_lock
+        self.key.is_none() || self.last_use.elapsed() >= self.auto_lock
     }
 
     /// Verrouille : efface les secrets de la mémoire et détruit la clé.
     pub fn lock(mut self) {
+        self.wipe();
+    }
+
+    fn ensure_unlocked(&mut self) -> Result<(), String> {
+        if self.is_expired() {
+            self.wipe();
+            return Err("coffre verrouillé après inactivité".into());
+        }
+        self.last_use = Instant::now();
+        Ok(())
+    }
+
+    fn wipe(&mut self) {
         for value in self.entries.values_mut() {
-            // Écrasement mémoire best-effort avant libération.
-            unsafe { value.as_mut_vec().fill(0) };
+            value.zeroize();
         }
         self.entries.clear();
+        self.key.take();
     }
+}
+
+impl Drop for Vault {
+    fn drop(&mut self) {
+        self.wipe();
+    }
+}
+
+fn derive_key(passphrase: &str, salt: &[u8], iterations: u64) -> Result<AesGcmKey, String> {
+    if !(1..=10_000_000).contains(&iterations) {
+        return Err("nombre d'itérations invalide".into());
+    }
+    let derived = Zeroizing::new(
+        cng::pbkdf2_sha256(passphrase.as_bytes(), salt, iterations, KEY_LEN)
+            .map_err(|e| format!("dérivation de clé : {e}"))?,
+    );
+    let mut key = Zeroizing::new([0u8; KEY_LEN]);
+    key.copy_from_slice(&derived);
+    AesGcmKey::new(&key).map_err(|e| format!("clé AES : {e}"))
 }
 
 /// Encodage des entrées : `[u32 longueur][octets]` pour la clé puis la valeur.
@@ -295,7 +354,8 @@ fn decode_entries(data: &[u8]) -> Result<BTreeMap<String, String>, String> {
         let key = take_len_prefixed(data, &mut cursor)?;
         let value = take_len_prefixed(data, &mut cursor)?;
         let key = String::from_utf8(key.to_vec()).map_err(|_| "clé non UTF-8".to_string())?;
-        let value = String::from_utf8(value.to_vec()).map_err(|_| "valeur non UTF-8".to_string())?;
+        let value =
+            String::from_utf8(value.to_vec()).map_err(|_| "valeur non UTF-8".to_string())?;
         entries.insert(key, value);
     }
     Ok(entries)
@@ -321,13 +381,18 @@ mod tests {
         let path = temp_path();
         let mut vault =
             Vault::create_with_iterations(&path, "phrase-maitre-de-test", TEST_ITERATIONS).unwrap();
-        vault.set("imap", "mot-de-passe-ultra-long-256bits").unwrap();
+        vault
+            .set("imap", "mot-de-passe-ultra-long-256bits")
+            .unwrap();
         vault.set("smtp", "un-autre-secret").unwrap();
         assert_eq!(vault.len(), 2);
         drop(vault);
 
         let mut reopened = Vault::open(&path, "phrase-maitre-de-test").unwrap();
-        assert_eq!(reopened.get("imap"), Some("mot-de-passe-ultra-long-256bits"));
+        assert_eq!(
+            reopened.get("imap"),
+            Some("mot-de-passe-ultra-long-256bits")
+        );
         assert_eq!(reopened.keys().len(), 2);
         std::fs::remove_file(&path).ok();
     }
@@ -335,7 +400,8 @@ mod tests {
     #[test]
     fn wrong_master_passphrase_is_rejected() {
         let path = temp_path();
-        let mut vault = Vault::create_with_iterations(&path, "bonne-phrase", TEST_ITERATIONS).unwrap();
+        let mut vault =
+            Vault::create_with_iterations(&path, "bonne-phrase", TEST_ITERATIONS).unwrap();
         vault.set("cle", "valeur").unwrap();
         drop(vault);
         assert!(Vault::open(&path, "mauvaise-phrase").is_err());
@@ -373,20 +439,13 @@ mod tests {
     fn auto_lock_expires_after_inactivity() {
         let path = temp_path();
         let mut vault = Vault::create_with_iterations(&path, "phrase", TEST_ITERATIONS).unwrap();
-        vault.set_auto_lock(Duration::from_millis(10));
-        vault.touch(); // la dérivation de clé a déjà consommé du temps
+        vault.set("cle", "secret").unwrap();
+        vault.set_auto_lock(Duration::from_secs(1));
         assert!(!vault.is_expired());
-        std::thread::sleep(Duration::from_millis(25));
+        vault.last_use = Instant::now() - Duration::from_secs(2);
         assert!(vault.is_expired());
+        assert_eq!(vault.get("cle"), None);
+        assert!(vault.set("cle", "secret").is_err());
         std::fs::remove_file(&path).ok();
     }
-}
-
-/// Dérive une clé AES-256 depuis la phrase maître et le sel.
-fn derive_key(passphrase: &str, salt: &[u8], iterations: u64) -> Result<AesGcmKey, String> {
-    let derived = cng::pbkdf2_sha256(passphrase.as_bytes(), salt, iterations, KEY_LEN)
-        .map_err(|e| format!("dérivation de clé : {e}"))?;
-    let mut key = [0u8; KEY_LEN];
-    key.copy_from_slice(&derived);
-    AesGcmKey::new(&key).map_err(|e| format!("clé AES : {e}"))
 }

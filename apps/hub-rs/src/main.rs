@@ -1,8 +1,8 @@
 //! vx-hub — service communautaire Vertex : chat en direct, forums, avis sur le
 //! logiciel et partenaires (publicité Discord payante et modérée).
 //!
-//! Serveur HTTP **écrit à la main**, aucune dépendance réseau, aléa et
-//! dérivation de mot de passe maison (voir `auth.rs`), stockage SQLite.
+//! Serveur communautaire local. L'alea et la derivation utilisent des
+//! bibliotheques maintenues. Ce module n'est pas une offre publique hebergee.
 
 // Le serveur expose volontairement une surface d'API complète (helpers et
 // routes destinés aux évolutions) : on n'avertit pas pour le code encore
@@ -14,9 +14,10 @@ mod http;
 mod store;
 
 use std::net::TcpListener;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use http::{read_request, write_response, Request, Response};
+use http::{Request, Response, read_request, write_response};
 use store::User;
 
 /// Interface de la communauté (embarquée dans le binaire).
@@ -32,6 +33,17 @@ fn main() {
         .nth(1)
         .and_then(|a| a.parse().ok())
         .unwrap_or(8787);
+
+    let host = std::env::var("VX_HUB_HOST").unwrap_or_else(|_| "127.0.0.1".into());
+    if !host
+        .parse::<std::net::IpAddr>()
+        .is_ok_and(|ip| ip.is_loopback())
+    {
+        eprintln!(
+            "Le hub est local uniquement : VX_HUB_HOST doit etre une adresse loopback. Ne pas exposer ce service publiquement."
+        );
+        std::process::exit(1);
+    }
 
     let db_path = store::default_path();
     let conn = match store::init(&db_path) {
@@ -71,7 +83,7 @@ fn main() {
     }
 
     let db: Db = Arc::new(Mutex::new(conn));
-    let listener = match TcpListener::bind(("0.0.0.0", port)) {
+    let listener = match TcpListener::bind((host.as_str(), port)) {
         Ok(listener) => listener,
         Err(error) => {
             eprintln!("hub : port {port} indisponible : {error}");
@@ -79,20 +91,68 @@ fn main() {
         }
     };
 
-    println!("Vertex Hub (vx-hub) sur http://127.0.0.1:{port}");
+    println!("Vertex Hub (vx-hub) sur http://{host}:{port}");
     println!("Base : {}", db_path.display());
     println!("Aucun log de requête n'est conservé.");
+    let active = Arc::new(AtomicUsize::new(0));
 
     for stream in listener.incoming() {
         let Ok(mut stream) = stream else { continue };
+        if active
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
+                (n < 64).then_some(n + 1)
+            })
+            .is_err()
+        {
+            let _ = stream.set_write_timeout(Some(std::time::Duration::from_secs(1)));
+            write_response(&mut stream, &Response::json_error(503, "serveur occupé"));
+            continue;
+        }
+        let active = Arc::clone(&active);
         let db = Arc::clone(&db);
         std::thread::spawn(move || {
+            struct Permit(Arc<AtomicUsize>);
+            impl Drop for Permit {
+                fn drop(&mut self) {
+                    self.0.fetch_sub(1, Ordering::AcqRel);
+                }
+            }
+            let _permit = Permit(active);
             if let Some(request) = read_request(&mut stream) {
+                if !local_request(&request, port) {
+                    write_response(
+                        &mut stream,
+                        &Response::json_error(403, "origine externe refusee"),
+                    );
+                    return;
+                }
                 let response = handle(&db, &request);
                 write_response(&mut stream, &response);
             }
         });
     }
+}
+
+fn local_request(request: &Request, port: u16) -> bool {
+    let hosts = [
+        format!("127.0.0.1:{port}"),
+        format!("localhost:{port}"),
+        format!("[::1]:{port}"),
+    ];
+    let host_ok = request
+        .headers
+        .get("host")
+        .is_some_and(|h| hosts.iter().any(|allowed| h.eq_ignore_ascii_case(allowed)));
+    let origin_ok = request
+        .headers
+        .get("origin")
+        .is_none_or(|origin| hosts.iter().any(|h| origin == &format!("http://{h}")));
+    host_ok
+        && origin_ok
+        && !request
+            .headers
+            .get("sec-fetch-site")
+            .is_some_and(|v| v == "cross-site")
 }
 
 /// Utilisateur courant à partir du cookie de session.
@@ -117,6 +177,16 @@ fn valid_username(name: &str) -> bool {
         && name
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
+fn valid_invite(value: &str) -> bool {
+    url::Url::parse(value).is_ok_and(|url| {
+        url.scheme() == "https"
+            && url.username().is_empty()
+            && url.password().is_none()
+            && matches!(url.host_str(), Some("discord.gg" | "discord.com"))
+            && url.port_or_known_default() == Some(443)
+    })
 }
 
 /// Routage : découpe le chemin et délègue selon la méthode.
@@ -164,7 +234,10 @@ fn handle_get(db: &Db, request: &Request, segments: &[&str]) -> Response {
         },
 
         ["api", "rooms", slug, "messages"] => {
-            let since: i64 = request.param("since").and_then(|v| v.parse().ok()).unwrap_or(0);
+            let since: i64 = request
+                .param("since")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0);
             match store::room_by_slug(&conn, slug) {
                 Ok(Some(room)) => match store::list_messages(&conn, room.id, since, 200) {
                     Ok(messages) => {
@@ -245,8 +318,11 @@ fn handle_post(db: &Db, request: &Request, segments: &[&str]) -> Response {
                     "pseudo invalide (3–32 caractères : lettres, chiffres, _ ou -)",
                 );
             }
-            if password.chars().count() < MIN_PASSWORD {
-                return Response::json_error(400, "mot de passe trop court (10 caractères minimum)");
+            if password.chars().count() < MIN_PASSWORD || password.len() > 1024 {
+                return Response::json_error(
+                    400,
+                    "mot de passe trop court (10 caractères minimum)",
+                );
             }
             if store::find_user(&conn, &username).ok().flatten().is_some() {
                 return Response::json_error(409, "ce pseudo est déjà pris");
@@ -256,8 +332,11 @@ fn handle_post(db: &Db, request: &Request, segments: &[&str]) -> Response {
                 Ok(id) => {
                     let token = auth::new_session_token();
                     store::create_session(&conn, id, &token, SESSION_DAYS).ok();
-                    Response::json(serde_json::json!({ "ok": true, "username": username }))
-                        .cookie(SESSION_COOKIE, &token, SESSION_DAYS * 86_400)
+                    Response::json(serde_json::json!({ "ok": true, "username": username })).cookie(
+                        SESSION_COOKIE,
+                        &token,
+                        SESSION_DAYS * 86_400,
+                    )
                 }
                 Err(error) => db_error(error),
             }
@@ -266,12 +345,18 @@ fn handle_post(db: &Db, request: &Request, segments: &[&str]) -> Response {
         ["api", "login"] => {
             let username = field(&body, "username");
             let password = field(&body, "password");
+            if !valid_username(&username) || password.len() > 1024 {
+                return Response::json_error(401, "identifiants incorrects");
+            }
             match store::find_user(&conn, &username) {
                 Ok(Some((user, hash))) if auth::verify_password(&password, &hash) => {
                     let token = auth::new_session_token();
                     store::create_session(&conn, user.id, &token, SESSION_DAYS).ok();
-                    Response::json(serde_json::json!({ "ok": true, "user": user }))
-                        .cookie(SESSION_COOKIE, &token, SESSION_DAYS * 86_400)
+                    Response::json(serde_json::json!({ "ok": true, "user": user })).cookie(
+                        SESSION_COOKIE,
+                        &token,
+                        SESSION_DAYS * 86_400,
+                    )
                 }
                 // Réponse identique que le compte existe ou non (pas d'énumération).
                 _ => Response::json_error(401, "identifiants incorrects"),
@@ -377,7 +462,7 @@ fn handle_post(db: &Db, request: &Request, segments: &[&str]) -> Response {
             let title = field(&body, "title");
             let invite = field(&body, "invite_url");
             let description = field(&body, "description");
-            if title.is_empty() || !invite.starts_with("https://discord.") {
+            if title.is_empty() || title.len() > 300 || !valid_invite(&invite) {
                 return Response::json_error(
                     400,
                     "titre requis et lien Discord (https://discord.gg/…) requis",
@@ -403,7 +488,10 @@ fn handle_post(db: &Db, request: &Request, segments: &[&str]) -> Response {
                 return Response::json_error(400, "identifiant invalide");
             };
             let status = field(&body, "status");
-            if !matches!(status.as_str(), "active" | "rejected" | "pending" | "expired") {
+            if !matches!(
+                status.as_str(),
+                "active" | "rejected" | "pending" | "expired"
+            ) {
                 return Response::json_error(400, "statut invalide");
             }
             let paid = body.get("paid").and_then(|v| v.as_bool()).unwrap_or(false);
@@ -414,5 +502,45 @@ fn handle_post(db: &Db, request: &Request, segments: &[&str]) -> Response {
         }
 
         _ => Response::json_error(404, "route inconnue"),
+    }
+}
+
+#[cfg(test)]
+mod security_tests {
+    use super::*;
+    #[test]
+    fn discord_invites_cannot_use_lookalike_domains() {
+        assert!(valid_invite("https://discord.gg/vertex"));
+        assert!(valid_invite("https://discord.com/invite/vertex"));
+        for value in [
+            "https://discord.evil.example/",
+            "https://discord.gg@evil.example/",
+            "javascript:alert(1)",
+            "http://discord.gg/vertex",
+        ] {
+            assert!(!valid_invite(value));
+        }
+    }
+    #[test]
+    fn hub_rejects_remote_origins_and_hosts() {
+        let mut request = Request {
+            method: "GET".into(),
+            path: "/".into(),
+            query: Default::default(),
+            headers: Default::default(),
+            cookies: Default::default(),
+            body: vec![],
+        };
+        request
+            .headers
+            .insert("host".into(), "localhost:8787".into());
+        assert!(local_request(&request, 8787));
+        request
+            .headers
+            .insert("origin".into(), "https://evil.example".into());
+        assert!(!local_request(&request, 8787));
+        request.headers.remove("origin");
+        request.headers.insert("host".into(), "evil.example".into());
+        assert!(!local_request(&request, 8787));
     }
 }

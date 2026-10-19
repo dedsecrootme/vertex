@@ -1,0 +1,15 @@
+.git
+.env
+.env.*
+!.env.example
+database
+database/**
+**/target
+**/node_modules
+**/.wrangler
+**/downloads
+test-results
+playwright-report
+**/*.pem
+**/*.pfx
+**/*.key

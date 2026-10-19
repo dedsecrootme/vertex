@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Vertex | Supervision</title><link rel="stylesheet" href="/panel.css"><script src="/panel.js" defer></script></head>
+<body>
+<header><a class="brand" href="/">Vertex<span>Supervision</span></a><div class="connection"><span id="connection" role="status">Connexion...</span><span id="updated">Aucune mesure</span></div><a class="back" href="/">Recherche <svg aria-hidden="true"><use href="/icons.svg#arrow-up-right"></use></svg></a></header>
+<main>
+<div class="heading"><div><p class="eyebrow">EXPLOITATION</p><h1>Activité du crawler</h1></div><div class="controls"><label><input id="auto" type="checkbox" checked> Actualisation</label><button type="button" id="refresh" class="icon-button" title="Actualiser" aria-label="Actualiser"><svg aria-hidden="true"><use href="/icons.svg#refresh-cw"></use></svg></button><button type="button" id="verify"><svg aria-hidden="true"><use href="/icons.svg#shield-check"></use></svg> Vérifier la base</button></div></div>
+<p class="alert" id="error" role="alert" hidden></p>
+<!-- html-validate-disable autocomplete-password -- This is a bearer token, not a saved account password. -->
+<form id="login" hidden><h2>Accès administrateur</h2><label for="token">Jeton administrateur</label><div class="login-row"><input id="token" type="password" autocomplete="off" required><button type="submit">Se connecter</button></div><p id="loginState" role="status"></p></form>
+<!-- html-validate-enable autocomplete-password -->
+<div id="content" hidden>
+<div id="crawlerControls" class="crawler-controls" hidden><span id="supervisorStatus" role="status"></span><label for="workerLimit">Workers max.</label><input id="workerLimit" type="number" min="1" max="64" value="64"><button type="button" id="startCrawler"><svg aria-hidden="true"><use href="/icons.svg#play"></use></svg> Démarrer</button><button type="button" id="stopCrawler"><svg aria-hidden="true"><use href="/icons.svg#square"></use></svg> Arrêter</button><span id="commandStatus" role="status"></span></div>
+<nav class="tabs" aria-label="Supervision"><button type="button" aria-pressed="true" data-view="activity">Activité</button><button type="button" aria-pressed="false" data-view="queue">File d’URL</button><button type="button" aria-pressed="false" data-view="storage">Base et vérification</button></nav>
+<section class="metrics" aria-label="Indicateurs"><div><span>Pages indexées</span><strong id="pages">-</strong><small id="rate">Débit non mesuré</small></div><div><span>URL en attente</span><strong id="pending">-</strong><small id="total">-</small></div><div><span>Workers en ligne</span><strong id="online">-</strong><small id="mode">Aucun signal récent</small></div><div><span>File traitée</span><strong id="progress">-</strong><small id="outcomes">-</small></div></section>
+<div data-section="activity">
+<section class="band"><div class="section-heading"><h2>Workers</h2><span id="heartbeat" class="muted">-</span></div><div id="workers" class="workers"></div><p class="muted" id="workerNotice"></p></section>
+<section class="band"><div class="section-heading"><h2>Pages indexées par session</h2><span class="legend"><i></i> Indexées <i class="red"></i> Échecs de tentative</span></div><figure><canvas id="chart" height="180" aria-label="Résultats des dernières sessions" role="img"></canvas><figcaption id="chartSummary" class="muted"></figcaption></figure></section>
+<section class="band"><h2>Dernières sessions</h2><div class="scroll"><table><thead><tr><th>Session</th><th>Début</th><th>État</th><th>Indexées</th><th>Échecs</th><th>Traitées</th></tr></thead><tbody id="runs"></tbody></table></div></section>
+<section class="band"><h2>Dernières erreurs</h2><div id="errors"></div></section>
+</div>
+<div data-section="queue" hidden>
+<section class="band"><div class="section-heading"><h2>Composition de la file</h2><span id="auditDate" class="muted">Analyse indisponible</span></div><p id="auditConclusion"></p><div class="queue-layout"><div><h3>Principaux domaines</h3><div id="domains"></div></div><div><h3>Paramètres rencontrés</h3><div id="parameters"></div></div></div></section>
+<section class="band"><h2>Origine et déduplication</h2><dl id="provenance" class="facts"></dl><h3>Dates d’ajout principales</h3><div id="days"></div></section>
+</div>
+<div data-section="storage" hidden>
+<section class="band"><div class="section-heading"><h2>Stockage</h2><span id="engine" class="muted">-</span></div><dl id="database" class="facts"></dl><progress id="diskBudget" value="0" max="100" aria-label="Quota de stockage utilisé"></progress><p id="diskNotice" class="muted"></p></section>
+<section class="band"><div class="section-heading"><h2>Vérification</h2><strong id="verificationStatus">Non exécutée</strong></div><dl id="verification" class="facts"></dl></section>
+</div>
+</div>
+</main><footer>Vertex · index de ce PC · <span id="latency">Aucune mesure</span></footer>
+</body></html>

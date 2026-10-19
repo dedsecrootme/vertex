@@ -5,11 +5,12 @@ edition = "2024"
 
 # vx-vault — coffre-fort de Vertex.
 #
-# * mot de passe maître -> clé via PBKDF2-HMAC-SHA256 (CNG, 200 000 itérations) ;
+# * mot de passe maître -> clé via PBKDF2-HMAC-SHA256 (CNG, 600 000 itérations) ;
 # * secrets chiffrés AES-256-GCM (CNG) avec en-tête authentifié ;
 # * génération de mots de passe ultra-longs (256 bits) ;
 # * verrouillage automatique, secrets gardés en mémoire uniquement.
 #
-# Aucune dépendance : la cryptographie vient de vx-sys (primitives système).
+# La cryptographie vient de vx-sys ; zeroize efface les buffers possedes.
 [dependencies]
 vx-sys = { path = "../vx-sys" }
+zeroize = "1"

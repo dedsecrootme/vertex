@@ -1,63 +1,68 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Vertex &mdash; Moteur de recherche personnel</title>
-<meta name="description" content="Vertex : un moteur de recherche personnel, l&eacute;ger et gratuit. Crawle le web, nettoie les contenus, recherche plein texte et interface native.">
-<style>
-  :root { --primary:#6c5ce7; --primary-dark:#4a3bd0; --accent:#00b894; --bg:#eef0fa; --card:#fff; --text:#16181d; --muted:#6b7280; }
-  * { box-sizing:border-box; }
-  body { margin:0; font-family:system-ui,'Segoe UI',Roboto,sans-serif; background:var(--bg); color:var(--text); line-height:1.6; }
-  .hero { background:radial-gradient(1200px 500px at 50% -60px,#7c6cf0,#5948d6); color:#fff; text-align:center; padding:4rem 1rem 5rem; }
-  .hero .logo { font-size:3rem; font-weight:800; }
-  .hero .logo span { color:#ffe08a; }
-  .hero p { max-width:620px; margin:.8rem auto 1.6rem; opacity:.95; font-size:1.15rem; }
-  .btn { display:inline-block; padding:.85rem 1.6rem; border-radius:12px; font-size:1rem; font-weight:600; text-decoration:none; cursor:pointer; border:0; transition:transform .1s, box-shadow .1s; }
-  .btn:hover { transform:translateY(-2px); box-shadow:0 8px 22px rgba(0,0,0,.2); }
-  .btn.download { background:#fff; color:var(--primary-dark); }
-  .btn.ghost { background:rgba(255,255,255,.15); color:#fff; border:1px solid rgba(255,255,255,.35); margin-top:1rem; }
-  main { max-width:920px; margin:-2.5rem auto 3rem; padding:0 1rem; }
-  .card { background:var(--card); border-radius:14px; padding:1.5rem 1.8rem; margin:1rem 0; box-shadow:0 2px 10px rgba(30,20,90,.08); }
-  .card h2 { margin-top:0; }
-  .features { display:flex; flex-wrap:wrap; gap:1rem; }
-  .feature { flex:1 1 220px; background:var(--card); border-radius:12px; padding:1.2rem; box-shadow:0 1px 4px rgba(0,0,0,.06); }
-  .feature .ico { font-size:1.6rem; }
-  .feature b { display:block; margin:.4rem 0 .2rem; }
-  footer { text-align:center; color:var(--muted); font-size:.85rem; padding:2rem 1rem 2.5rem; }
-  .dl-a { color:var(--primary-dark); }
-</style>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vertex | Le web, retrouvé.</title>
+<meta name="description" content="Vertex pour Windows. Un espace pour rechercher le web indexé, lire les pages et choisir de participer à l'exploration.">
+<meta name="theme-color" content="#171918">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preload" href="/vertex-chrome.webp" as="image" fetchpriority="high">
+<link rel="stylesheet" href="/site.css"><link rel="stylesheet" href="/premium.css"><script src="/site.js" defer></script>
 </head>
 <body>
-<div class="hero">
-  <div class="logo">&#x1F577; Vertex<span>.</span></div>
-  <p>Votre moteur de recherche personnel &mdash; crawle le web, nettoie les contenus, recherche plein texte, en local et gratuit.</p>
-  <a class="btn download" href="#download">&#x2B07; T&eacute;l&eacute;charger pour Windows</a>
-</div>
-
-<main>
-  <div class="card" id="download">
-    <h2>&#x2B07; T&eacute;l&eacute;chargement</h2>
-    <p><b>Vertex Desktop</b> &mdash; application Windows native (Tauri) : recherche, crawl int&eacute;gr&eacute; et interface moderne.</p>
-    <p><a class="dl-a" href="/downloads/Vertex_0.1.0_x64-setup.exe"><b>Vertex_0.1.0_x64-setup.exe</b></a> &middot; installeur Windows (NSIS, ~4,3 Mo)</p>
-    <p><a class="dl-a" href="/downloads/Vertex_0.1.0_x64_en-US.msi">Vertex_0.1.0_x64_en-US.msi</a> &middot; paquet Windows (MSI, ~6,1 Mo)</p>
-    <p class="note">Le logiciel est gratuit et open source. Sommes de contr&ocirc;le : <a class="dl-a" href="/downloads/SHA256SUMS.txt">SHA256SUMS.txt</a> &middot; <a class="dl-a" href="https://github.com/dedsecrootme/vertex/releases" target="_blank" rel="noopener">Releases GitHub</a>.</p>
+<a class="skip-link" href="#main">Aller au contenu</a>
+<header class="navigation"><div class="wrap nav-inner">
+  <a class="wordmark" href="/" aria-label="Vertex, accueil"><span class="mark" aria-hidden="true">V</span>Vertex</a>
+  <nav id="navLinks" class="nav-links" aria-label="Navigation principale"><a href="#produit">Le produit</a><a href="#exploration">Exploration</a><a href="#confidentialite">Vos données</a></nav>
+  <div class="nav-actions"><a class="button nav-download" href="#download"><svg class="icon" aria-hidden="true"><use href="/icons.svg#download"></use></svg>Windows</a><button class="icon-button menu-button" id="menuButton" type="button" aria-expanded="false" aria-controls="navLinks" aria-label="Ouvrir le menu" title="Ouvrir le menu"><svg class="icon" aria-hidden="true"><use href="/icons.svg#menu"></use></svg></button></div>
+</div></header>
+<main id="main">
+<section class="hero" aria-labelledby="title">
+  <img class="hero-art" src="/vertex-chrome.webp" width="1672" height="941" alt="" fetchpriority="high">
+  <div class="wrap hero-content"><p class="eyebrow"><span></span> RECHERCHE. LECTURE. EXPLORATION.</p><h1 id="title">Vertex<span>.</span></h1><p class="lead">Le web, retrouvé.</p><p class="intro">Un espace à vous pour chercher,<br>comprendre et poursuivre l’exploration.</p><div class="primary-actions"><a class="button primary" href="#download"><svg class="icon" aria-hidden="true"><use href="/icons.svg#download"></use></svg>Découvrir Vertex pour Windows</a><a class="text-link" href="/search">Ouvrir la recherche<svg class="icon" aria-hidden="true"><use href="/icons.svg#arrow-up-right"></use></svg></a></div></div>
+  <div class="wrap hero-bottom"><span>APPLICATION DE BUREAU <b>/</b> WINDOWS 10 &amp; 11 · X64</span><a href="#produit">DÉCOUVRIR VERTEX<svg class="icon" aria-hidden="true"><use href="/icons.svg#arrow-down"></use></svg></a></div>
+</section>
+<section class="product-band" id="produit" aria-labelledby="product-title">
+  <div class="wrap">
+    <div class="section-top"><p class="eyebrow dark">01 / UN ESPACE, TROIS PERSPECTIVES</p><span class="edition">VERTEX DESKTOP</span></div>
+    <div class="product-heading" data-reveal><h2 id="product-title">Du résultat.<br>À ce qui compte.</h2><p>Une recherche pour retrouver.<br>Une page pour comprendre.<br>Un moteur pour aller plus loin.</p></div>
+    <div class="product-controls"><div class="product-tabs" role="tablist" aria-label="Vues de Vertex"><button type="button" id="tab-search" class="product-tab" role="tab" aria-selected="true" aria-controls="product-view" data-view="search"><svg class="icon" aria-hidden="true"><use href="/icons.svg#search"></use></svg>Recherche</button><button type="button" id="tab-reader" class="product-tab" role="tab" aria-selected="false" aria-controls="product-view" tabindex="-1" data-view="reader"><svg class="icon" aria-hidden="true"><use href="/icons.svg#book-open"></use></svg>Lecture</button><button type="button" id="tab-crawler" class="product-tab" role="tab" aria-selected="false" aria-controls="product-view" tabindex="-1" data-view="crawler"><svg class="icon" aria-hidden="true"><use href="/icons.svg#activity"></use></svg>Crawler</button></div><button class="icon-button expand" id="expandPreview" type="button" aria-label="Agrandir l’aperçu" title="Agrandir l’aperçu"><svg class="icon" aria-hidden="true"><use href="/icons.svg#maximize-2"></use></svg></button></div>
+    <div class="gallery-error" id="previewError" role="alert" hidden><span>L’aperçu n’a pas pu être chargé.</span><button class="icon-button" id="retryPreview" type="button" title="Réessayer le chargement" aria-label="Réessayer le chargement"><svg class="icon" aria-hidden="true"><use href="/icons.svg#refresh-cw"></use></svg></button></div>
+    <span class="visually-hidden" id="galleryState" role="status" aria-live="polite"></span>
+    <div class="product-window" id="product-view" role="tabpanel" aria-labelledby="tab-search"><div class="window-bar"><span class="window-brand">V <b>Vertex</b></span><span id="viewName">Recherche</span><span class="window-state">INTERFACE VERTEX</span></div><img class="preview" id="productPreview" src="/search-view.png" width="1280" height="900" alt="Capture réelle de Vertex : résultats publics Rust sélectionnés" loading="eager"></div>
+    <div class="product-caption"><p id="viewCaption">Des résultats publics sélectionnés dans l’index local de Vertex.</p><span>CAPTURES LOCALES · 19 OCTOBRE 2026</span></div>
   </div>
-
-  <div class="card" id="about">
-    <h2>&Agrave; propos</h2>
-    <p>Vertex est un moteur de recherche construit en <b>Rust</b>. Il rassemble l'exploration web (crawler, le nettoyage du contenu, l'indexation plein texte ( FTS5) et une interface native, le tout <b>en local</b> et <b>sans suivi</b>.</p>
+</section>
+<section class="flow-section" id="exploration" aria-labelledby="flow-title">
+  <div class="wrap"><div class="section-top"><p class="eyebrow dark">02 / SUIVRE LE FIL</p><span class="edition">DE L’ADRESSE À LA LECTURE</span></div><h2 id="flow-title" data-reveal>Moins de détours.<br>Plus de contexte.</h2>
+  <div class="flow-grid">
+    <article class="glass-card" data-reveal>
+      <div class="flow-label"><span>01 / RECHERCHE</span><svg class="icon" aria-hidden="true"><use href="/icons.svg#search"></use></svg></div>
+      <img class="card-media" src="/search-view.png" width="1280" height="900" alt="" loading="lazy">
+      <h3><a href="#produit" data-open-view="search">Retrouver.<svg class="icon" aria-hidden="true"><use href="/icons.svg#arrow-up-right"></use></svg></a></h3>
+      <p>Interrogez les pages déjà indexées. Revenez au document, pas seulement à son titre.</p>
+      <span class="card-foot">L’INDEX COMME POINT DE DÉPART</span>
+    </article>
+    <article class="glass-card" data-reveal>
+      <div class="flow-label"><span>02 / LECTURE</span><svg class="icon" aria-hidden="true"><use href="/icons.svg#book-open"></use></svg></div>
+      <img class="card-media" src="/reader-view.png" width="1280" height="900" alt="" loading="lazy">
+      <h3><a href="#produit" data-open-view="reader">Approfondir.<svg class="icon" aria-hidden="true"><use href="/icons.svg#arrow-up-right"></use></svg></a></h3>
+      <p>Lisez le contenu conservé dans l’index et retrouvez les liens documentés au même endroit.</p>
+      <span class="card-foot">LE DOCUMENT, AU PREMIER PLAN</span>
+    </article>
+    <article class="glass-card" data-reveal>
+      <div class="flow-label"><span>03 / EXPLORATION</span><svg class="icon" aria-hidden="true"><use href="/icons.svg#activity"></use></svg></div>
+      <img class="card-media" src="/crawler-view.png" width="1280" height="900" alt="" loading="lazy">
+      <h3><a href="#produit" data-open-view="crawler">Explorer.<svg class="icon" aria-hidden="true"><use href="/icons.svg#arrow-up-right"></use></svg></a></h3>
+      <p>Choisissez de participer au crawl des pages publiques. L’activité reste contrôlable, avec des limites de ressources.</p>
+      <span class="card-foot">VOTRE MACHINE, VOTRE CHOIX</span>
+    </article>
   </div>
-
-  <h2 style="margin-top:2rem">Fonctionnalit&eacute;s</h2>
-  <div class="features">
-    <div class="feature"><span class="ico">&#x1F577;</span><b>Crawler multi-sites</b>Explore le web (liens externes, multi-thread.</div>
-    <div class="feature"><span class="ico">&#x1F9F9;</span><b>Contenu nettoy&eacute;</b>M&eacute;tadonn&eacute;es, navigation, pubs et scripts supprim&eacute;s.</div>
-    <div class="feature"><span class="ico">&#x1F50D;</span><b>Recherche FTS5</b>Plein texte index&eacute;, classement par pertinence.</div>
-    <div class="feature"><span class="ico">&#x1F4BB;</span><b>Application native</b>Windows .exe + version web, donn&eacute;es 100% locales.</div>
-  </div>
+  <div class="exploration-note"><svg class="icon" aria-hidden="true"><use href="/icons.svg#shield-check"></use></svg><p>Les pages accessibles ne sont pas toutes indexables. Vertex distingue les résultats, les erreurs et les exclusions imposées par les sites.</p></div></div>
+</section>
+<section class="privacy-section" id="confidentialite" aria-labelledby="privacy-title"><div class="wrap privacy-layout"><div data-reveal><p class="eyebrow dark">03 / VOS DONNÉES</p><h2 id="privacy-title">Le choix<br>vous appartient.</h2><p class="privacy-lead">L’exploration est volontaire.<br>Vos signets restent personnels.</p><span class="privacy-stamp"><svg class="icon" aria-hidden="true"><use href="/icons.svg#shield-check"></use></svg>UN ACCORD EXPLICITE</span></div><div class="privacy-details"><details open><summary>Mes signets sont-ils partagés ?<svg class="icon" aria-hidden="true"><use href="/icons.svg#plus"></use></svg></summary><p>Non. Les signets restent sur votre appareil. Ils ne sont pas ajoutés à l’index commun.</p></details><details><summary>Le crawler tourne-t-il sans mon accord ?<svg class="icon" aria-hidden="true"><use href="/icons.svg#plus"></use></svg></summary><p>Non. L’exploration sur le PC demande votre autorisation. La poursuite après fermeture de la fenêtre est une option distincte et peut être désactivée.</p></details><details><summary>Ma connexion est-elle anonyme ?<svg class="icon" aria-hidden="true"><use href="/icons.svg#plus"></use></svg></summary><p>Non. Les sites contactés voient l’adresse IP de la machine qui les explore. Une recherche dans un futur index partagé transmettra la requête au serveur Vertex.</p></details><details><summary>Où en est l’index partagé ?<svg class="icon" aria-hidden="true"><use href="/icons.svg#plus"></use></svg></summary><p>L’hébergement central reste à déployer. Le crawl local et la supervision existent ; aucun partage entre utilisateurs n’est activé par défaut.</p></details></div></div></section>
+<section class="download-section" id="download" aria-labelledby="download-title"><div class="wrap"><div class="section-top"><p class="eyebrow">04 / APPLICATION DE BUREAU</p><svg class="platform-icon" aria-hidden="true"><use href="/icons.svg#monitor"></use></svg></div><div class="download-layout"><div data-reveal><h2 id="download-title">Vertex<br>pour Windows<span>.</span></h2><p>Votre prochain point de départ.</p><span class="system">WINDOWS 10 / 11 · 64 BITS</span></div><div class="release"><div id="releaseState" class="release-state" role="status">Vérification de la version disponible…</div><a class="button download-button" id="downloadButton" hidden><svg class="icon" aria-hidden="true"><use href="/icons.svg#download"></use></svg><span id="downloadLabel">Télécharger</span></a><p class="checksum" id="checksum" hidden></p><p class="release-note">Seules les nouvelles versions validées seront proposées. Les anciens installateurs retirés ne sont pas distribués.</p><a href="/search" class="text-link">Accéder à la recherche<svg class="icon" aria-hidden="true"><use href="/icons.svg#arrow-up-right"></use></svg></a></div></div></div></section>
 </main>
-
-<footer>&#x1F577; Vertex &middot; gratuit et open source &middot; les donn&eacute;es restent sur votre machine</footer>
-</body>
-</html>
+<footer><div class="wrap footer-top"><a class="footer-wordmark" href="#main">Vertex<span>.</span></a><p>Le web, retrouvé.</p></div><div class="wrap footer-bottom"><span>by ded_sec</span><div><a href="#confidentialite">Vos données</a><a href="/THIRD-PARTY-NOTICES.txt">Licences des composants</a><a href="#main" aria-label="Retour en haut" title="Retour en haut"><svg class="icon" aria-hidden="true"><use href="/icons.svg#arrow-up"></use></svg></a></div></div></footer>
+<dialog id="previewDialog" aria-label="Aperçu agrandi de Vertex"><button id="closePreview" class="icon-button" type="button" aria-label="Fermer l’aperçu" title="Fermer l’aperçu"><svg class="icon" aria-hidden="true"><use href="/icons.svg#x"></use></svg></button><img id="largePreview" src="/search-view.png" width="1280" height="900" alt="" loading="lazy"><p>Capture locale · 19 octobre 2026 · les compteurs ne sont pas en direct</p></dialog>
+</body></html>

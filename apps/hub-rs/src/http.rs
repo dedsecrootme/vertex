@@ -9,6 +9,20 @@ use std::net::TcpStream;
 
 /// Taille maximale acceptée pour un corps de requête (1 Mo).
 const MAX_BODY: usize = 1_048_576;
+const MAX_LINE: usize = 8192;
+const MAX_HEADERS: usize = 32_768;
+
+fn bounded_line(reader: &mut impl BufRead) -> Option<String> {
+    let mut bytes = Vec::new();
+    reader
+        .take(MAX_LINE as u64 + 1)
+        .read_until(b'\n', &mut bytes)
+        .ok()?;
+    if bytes.len() > MAX_LINE || !bytes.ends_with(b"\r\n") {
+        return None;
+    }
+    String::from_utf8(bytes).ok()
+}
 
 pub struct Request {
     pub method: String,
@@ -137,13 +151,26 @@ fn parse_query(raw: &str) -> HashMap<String, String> {
 
 /// Lit une requête HTTP complète (en-têtes + corps) depuis la connexion.
 pub fn read_request(stream: &mut TcpStream) -> Option<Request> {
-    let mut reader = BufReader::new(stream.try_clone().ok()?);
+    stream
+        .set_read_timeout(Some(std::time::Duration::from_secs(10)))
+        .ok()?;
+    stream
+        .set_write_timeout(Some(std::time::Duration::from_secs(10)))
+        .ok()?;
+    parse_request(BufReader::new(stream.try_clone().ok()?))
+}
 
-    let mut request_line = String::new();
-    reader.read_line(&mut request_line).ok()?;
+fn parse_request(mut reader: impl BufRead) -> Option<Request> {
+    let request_line = bounded_line(&mut reader)?;
     let mut parts = request_line.split_whitespace();
     let method = parts.next()?.to_string();
     let target = parts.next()?.to_string();
+    if !matches!(parts.next()?, "HTTP/1.0" | "HTTP/1.1")
+        || parts.next().is_some()
+        || !target.starts_with('/')
+    {
+        return None;
+    }
 
     let (path, query) = match target.split_once('?') {
         Some((p, q)) => (p.to_string(), parse_query(q)),
@@ -151,17 +178,30 @@ pub fn read_request(stream: &mut TcpStream) -> Option<Request> {
     };
 
     let mut headers = HashMap::new();
+    let mut header_bytes = 0;
     loop {
-        let mut line = String::new();
-        if reader.read_line(&mut line).ok()? == 0 {
-            break;
+        let line = bounded_line(&mut reader)?;
+        header_bytes += line.len();
+        if header_bytes > MAX_HEADERS {
+            return None;
         }
         let line = line.trim_end_matches(['\r', '\n']);
         if line.is_empty() {
             break;
         }
-        if let Some((key, value)) = line.split_once(':') {
-            headers.insert(key.trim().to_ascii_lowercase(), value.trim().to_string());
+        let (key, value) = line.split_once(':')?;
+        if key.is_empty()
+            || !key
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b))
+        {
+            return None;
+        }
+        if headers
+            .insert(key.to_ascii_lowercase(), value.trim().to_string())
+            .is_some()
+        {
+            return None;
         }
     }
 
@@ -174,11 +214,17 @@ pub fn read_request(stream: &mut TcpStream) -> Option<Request> {
         }
     }
 
-    let length: usize = headers
-        .get("content-length")
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(0)
-        .min(MAX_BODY);
+    if headers.contains_key("transfer-encoding") {
+        return None;
+    }
+    let length: usize = match headers.get("content-length") {
+        Some(value) if value.bytes().all(|b| b.is_ascii_digit()) => value.parse().ok()?,
+        Some(_) => return None,
+        None => 0,
+    };
+    if length > MAX_BODY {
+        return None;
+    }
 
     let mut body = vec![0u8; length];
     if length > 0 {
@@ -207,6 +253,7 @@ pub fn write_response(stream: &mut TcpStream, response: &Response) {
         404 => "Not Found",
         409 => "Conflict",
         429 => "Too Many Requests",
+        503 => "Service Unavailable",
         _ => "Internal Server Error",
     };
 
@@ -225,4 +272,33 @@ pub fn write_response(stream: &mut TcpStream, response: &Response) {
     let _ = stream.write_all(head.as_bytes());
     let _ = stream.write_all(&response.body);
     let _ = stream.flush();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_bounded_request_with_query_cookie_and_body() {
+        let request = parse_request(&b"POST /api/x?q=caf%C3%A9 HTTP/1.1\r\nCookie: vx_session=abc\r\nContent-Length: 2\r\n\r\n{}"[..]).unwrap();
+        assert_eq!(request.param("q"), Some("café"));
+        assert_eq!(request.cookie("vx_session"), Some("abc"));
+        assert_eq!(request.body, b"{}");
+    }
+
+    #[test]
+    fn rejects_ambiguous_and_oversized_requests() {
+        for headers in [
+            "Content-Length: 1048577",
+            "Content-Length: nope",
+            "Content-Length: 2\r\nContent-Length: 2",
+            "Transfer-Encoding: chunked",
+        ] {
+            let raw = format!("POST / HTTP/1.1\r\n{headers}\r\n\r\n{{}}");
+            assert!(parse_request(raw.as_bytes()).is_none());
+        }
+        let raw = format!("GET /{} HTTP/1.1\r\n\r\n", "a".repeat(MAX_LINE));
+        assert!(parse_request(raw.as_bytes()).is_none());
+        assert!(parse_request(&b"GET / HTTP/1.1\r\nHost: x\r\n"[..]).is_none());
+    }
 }

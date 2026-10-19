@@ -1,8 +1,9 @@
 //! vx-sys — couche « plus bas niveau » de Vertex : **FFI directe** vers les
-//! primitives système de Windows (aucune dépendance, aucune crate).
+//! primitives système de Windows. Les copies de secrets utilisent zeroize.
 //!
 //! - **CNG** (`bcrypt.dll`) : aléa cryptographique, **AES-256-GCM** authentifié.
-//! - **SChannel** (`secur32.dll`) : TLS client (voir [`tls`]).
+//!
+//! A SChannel TLS transport is planned; it is not implemented here yet.
 //!
 //! La cryptographie n'est jamais réécrite à la main : on pilote les primitives
 //! auditées du système, ce qui est le seul choix sûr.

@@ -158,7 +158,7 @@ pub fn check_url(url: &str) -> SafetyReport {
                 verdict: Verdict::Malicious,
                 score: 100,
                 reasons: vec!["URL illisible".to_string()],
-            }
+            };
         }
     };
 
@@ -225,7 +225,9 @@ pub fn check_url(url: &str) -> SafetyReport {
         for pattern in user_blocklist() {
             if host.contains(pattern.as_str()) || lowered.contains(pattern.as_str()) {
                 score += 70;
-                reasons.push(format!("Présent dans la blocklist utilisateur : « {pattern} »"));
+                reasons.push(format!(
+                    "Présent dans la blocklist utilisateur : « {pattern} »"
+                ));
                 break;
             }
         }
@@ -241,11 +243,12 @@ pub fn check_url(url: &str) -> SafetyReport {
         }
     }
 
-    if let Some(port) = parsed.port() {
-        if port != 80 && port != 443 {
-            score += 10;
-            reasons.push(format!("Port réseau inhabituel ({port})"));
-        }
+    if let Some(port) = parsed.port()
+        && port != 80
+        && port != 443
+    {
+        score += 10;
+        reasons.push(format!("Port réseau inhabituel ({port})"));
     }
 
     let verdict = if score >= 70 {
@@ -279,12 +282,18 @@ mod tests {
 
     #[test]
     fn flags_executable_download() {
-        assert_ne!(check_url("http://example.com/setup.exe").verdict, Verdict::Safe);
+        assert_ne!(
+            check_url("http://example.com/setup.exe").verdict,
+            Verdict::Safe
+        );
     }
 
     #[test]
     fn flags_ip_host_and_shortener() {
-        assert_ne!(check_url("http://192.168.1.10/login").verdict, Verdict::Safe);
+        assert_ne!(
+            check_url("http://192.168.1.10/login").verdict,
+            Verdict::Safe
+        );
         assert_eq!(check_url("https://bit.ly/abc").verdict, Verdict::Suspicious);
     }
 

@@ -1,0 +1,11 @@
+{$VERTEX_HOST} {
+    encode zstd gzip
+    request_body {
+        max_size 16KB
+    }
+    reverse_proxy api:3000 {
+        transport http {
+            response_header_timeout 25s
+        }
+    }
+}

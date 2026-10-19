@@ -25,8 +25,13 @@ impl Pattern {
             return None;
         }
 
+        let raw = normalize_path(raw);
         let anchored = raw.ends_with('$');
-        let body = if anchored { &raw[..raw.len() - 1] } else { raw };
+        let body = if anchored {
+            &raw[..raw.len() - 1]
+        } else {
+            &raw
+        };
 
         let mut expression = String::from("^");
         for ch in body.chars() {
@@ -41,7 +46,7 @@ impl Pattern {
 
         Some(Self {
             regex: Regex::new(&expression).ok()?,
-            weight: body.chars().count(),
+            weight: body.len(),
         })
     }
 
@@ -74,12 +79,16 @@ pub struct Rules {
 impl Rules {
     /// Vrai si `path` (chemin + requête) est autorisé.
     pub fn allows(&self, path: &str) -> bool {
-        let denied = longest_match(&self.disallow, path);
-        let allowed = longest_match(&self.allow, path);
+        let path = normalize_path(path);
+        if path == "/robots.txt" {
+            return true;
+        }
+        let denied = longest_match(&self.disallow, &path);
+        let allowed = longest_match(&self.allow, &path);
         match (denied, allowed) {
             // Motif le plus long gagnant ; à égalité, Allow l'emporte.
             (_, Some(len)) if denied.map(|d| len >= d).unwrap_or(true) => true,
-            (Some(_), None) => false,
+            (Some(_), _) => false,
             _ => true,
         }
     }
@@ -88,6 +97,36 @@ impl Rules {
     pub fn is_permissive(&self) -> bool {
         self.allow.is_empty() && self.disallow.is_empty()
     }
+}
+
+/// Compare escaped and unescaped unreserved bytes consistently (RFC 9309).
+fn normalize_path(path: &str) -> String {
+    let mut result = String::new();
+    let bytes = path.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let byte = bytes[i];
+        if byte == b'%'
+            && i + 2 < bytes.len()
+            && let Ok(pair) = std::str::from_utf8(&bytes[i + 1..i + 3])
+            && let Ok(decoded) = u8::from_str_radix(pair, 16)
+        {
+            if decoded.is_ascii_alphanumeric() || b"-._~".contains(&decoded) {
+                result.push(decoded as char);
+            } else {
+                result.push_str(&format!("%{decoded:02X}"));
+            }
+            i += 3;
+            continue;
+        }
+        if byte.is_ascii() {
+            result.push(byte as char);
+        } else {
+            result.push_str(&format!("%{byte:02X}"));
+        }
+        i += 1;
+    }
+    result
 }
 
 /// Convertit `Crawl-delay` en millisecondes (accepte les décimales).
@@ -153,38 +192,48 @@ pub fn parse(body: &str, user_agent: &str) -> Rules {
                         entries: Vec::new(),
                     });
                 }
-                groups.last_mut().expect("groupe").entries.push((key, value));
+                groups
+                    .last_mut()
+                    .expect("groupe")
+                    .entries
+                    .push((key, value));
             }
             _ => {}
         }
     }
 
     // Groupe le plus spécifique correspondant à notre agent, sinon « * ».
-    let mut specific: Option<usize> = None;
-    let mut specific_len = 0usize;
-    let mut wildcard: Option<usize> = None;
-
-    for (index, group) in groups.iter().enumerate() {
-        if group.entries.is_empty() {
-            continue;
-        }
-        for agent in &group.agents {
-            if agent == "*" {
-                wildcard = Some(index);
-            } else if wanted.contains(agent.as_str()) && agent.len() > specific_len {
-                specific = Some(index);
-                specific_len = agent.len();
-            }
-        }
-    }
+    let weights: Vec<usize> = groups
+        .iter()
+        .map(|group| {
+            group
+                .agents
+                .iter()
+                .filter(|agent| {
+                    !agent.is_empty() && agent.as_str() != "*" && wanted.contains(agent.as_str())
+                })
+                .map(String::len)
+                .max()
+                .unwrap_or(0)
+        })
+        .collect();
+    let specific_len = weights.iter().copied().max().unwrap_or(0);
 
     let mut rules = Rules {
         sitemaps,
         ..Rules::default()
     };
 
-    if let Some(index) = specific.or(wildcard) {
-        for (key, value) in &groups[index].entries {
+    for (group, weight) in groups.iter().zip(weights) {
+        let selected = if specific_len > 0 {
+            weight == specific_len
+        } else {
+            group.agents.iter().any(|agent| agent == "*")
+        };
+        if !selected {
+            continue;
+        }
+        for (key, value) in &group.entries {
             match key.as_str() {
                 "disallow" => {
                     if let Some(pattern) = Pattern::new(value) {
@@ -198,10 +247,16 @@ pub fn parse(body: &str, user_agent: &str) -> Rules {
                 }
                 "crawl-delay" => {
                     if let Some(ms) = parse_delay(value) {
-                        rules.crawl_delay_ms = Some(ms);
+                        rules.crawl_delay_ms = Some(rules.crawl_delay_ms.unwrap_or(0).max(ms));
                     }
                 }
-                "request-rate" => rules.request_rate = parse_request_rate(value),
+                "request-rate" => {
+                    if let Some((requests, seconds)) = parse_request_rate(value) {
+                        let delay = seconds.saturating_mul(1000).div_ceil(requests as u64);
+                        rules.crawl_delay_ms = Some(rules.crawl_delay_ms.unwrap_or(0).max(delay));
+                        rules.request_rate = Some((requests, seconds));
+                    }
+                }
                 _ => {}
             }
         }
@@ -214,6 +269,44 @@ pub fn parse(body: &str, user_agent: &str) -> Rules {
 mod tests {
     use super::*;
 
+    #[test]
+    fn shorter_allow_cannot_override_longer_disallow() {
+        let rules = parse(
+            "User-agent: *\nAllow: /\nDisallow: /private\n",
+            "VertexCrawler",
+        );
+        assert!(!rules.allows("/private/data"));
+        assert!(rules.allows("/public"));
+    }
+
+    #[test]
+    fn combines_matching_groups_and_accepts_empty_specific_group() {
+        let rules = parse(
+            "User-agent: VertexCrawler\nDisallow: /one\nUser-agent: vertexcrawler\nDisallow: /two\n",
+            "VertexCrawler",
+        );
+        assert!(!rules.allows("/one"));
+        assert!(!rules.allows("/two"));
+        assert!(
+            parse(
+                "User-agent: *\nDisallow: /\nUser-agent: VertexCrawler\n",
+                "VertexCrawler"
+            )
+            .allows("/one")
+        );
+    }
+
+    #[test]
+    fn escaped_paths_and_allow_ties_follow_the_same_rules() {
+        let rules = parse(
+            "User-agent: *\nDisallow: /café\nDisallow: /~private\nDisallow: /same\nAllow: /same\n",
+            "VertexCrawler",
+        );
+        assert!(!rules.allows("/caf%C3%A9"));
+        assert!(!rules.allows("/%7eprivate"));
+        assert!(rules.allows("/same"));
+    }
+
     /// Exemples de la RFC 9309 : la règle du plus long match.
     #[test]
     fn rfc_longest_match_wins() {
@@ -223,7 +316,10 @@ mod tests {
         );
         assert!(!rules.allows("/fish"), "/fish bloqué");
         assert!(!rules.allows("/birds"), "/birds bloqué");
-        assert!(rules.allows("/birds/fish"), "/birds/fish autorisé (plus long)");
+        assert!(
+            rules.allows("/birds/fish"),
+            "/birds/fish autorisé (plus long)"
+        );
         assert!(rules.allows("/birds/fishheads"));
         assert!(!rules.allows("/fishheads"), "commence par /fish");
     }
@@ -246,8 +342,14 @@ mod tests {
     #[test]
     fn most_specific_user_agent_group_wins() {
         let body = "User-agent: *\nDisallow: /\n\nUser-agent: VertexCrawler\nDisallow:\n";
-        assert!(parse(body, "VertexCrawler").allows("/"), "agent spécifique non bloqué");
-        assert!(!parse(body, "AutreBot").allows("/"), "agent générique bloqué");
+        assert!(
+            parse(body, "VertexCrawler").allows("/"),
+            "agent spécifique non bloqué"
+        );
+        assert!(
+            !parse(body, "AutreBot").allows("/"),
+            "agent générique bloqué"
+        );
     }
 
     #[test]

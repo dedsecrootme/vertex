@@ -5,19 +5,24 @@
 //! signets et messages de contact.
 
 use rusqlite::{Connection, OptionalExtension};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crawler_rs::database;
 
+pub use crawler_rs::SEEDS;
+pub use crawler_rs::database::request_indexing as database_request_indexing;
 pub use crawler_rs::database::{
     Bookmark, ContactMessage, DbStats, blocklist_path, default_db_dir, init_in, optimize,
+    workspace_root,
 };
-pub use crawler_rs::safety;
+pub mod shared;
+pub use crawler_rs::monitor;
+pub use crawler_rs::network;
 pub use crawler_rs::runner;
-pub use crawler_rs::SEEDS;
+pub use crawler_rs::safety;
 
 /// Un résultat de recherche.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct SearchResult {
     pub url: String,
     pub title: String,
@@ -30,14 +35,14 @@ pub struct SearchResult {
 }
 
 /// Une image documentée d'une page.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ImageRef {
     pub url: String,
     pub alt: Option<String>,
 }
 
 /// Un lien complet sortant d'une page.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct LinkRef {
     pub url: String,
     pub anchor: Option<String>,
@@ -46,7 +51,7 @@ pub struct LinkRef {
 }
 
 /// Contenu complet d'une page pour la visionneuse.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct PageView {
     pub url: String,
     pub domain: String,
@@ -72,6 +77,17 @@ pub fn search(
     query: &str,
     offset: usize,
 ) -> Result<Vec<SearchResult>, rusqlite::Error> {
+    if let Some(url) = runner::discovery_url(query) {
+        if offset != 0 {
+            return Ok(Vec::new());
+        }
+        return conn.query_row(
+            "SELECT p.url, COALESCE(p.title,''), substr(COALESCE(p.description,p.content,''),1,240), COALESCE(p.domain,''),
+             COALESCE((SELECT safety FROM urls WHERE url=p.url),'unknown'), EXISTS(SELECT 1 FROM bookmarks WHERE url=p.url)
+             FROM pages p WHERE p.url=?1", [url], |row| Ok(SearchResult {
+                url: row.get(0)?, title: row.get(1)?, snippet: row.get(2)?, domain: row.get(3)?, safety: row.get(4)?, bookmarked: row.get(5)?,
+             })).optional().map(|result| result.into_iter().collect());
+    }
     let match_query = fts_query(query);
     if match_query.is_empty() {
         return Ok(Vec::new());
@@ -79,8 +95,8 @@ pub fn search(
 
     let mut stmt = conn.prepare(
         "SELECT p.url,
-                p.title,
-                snippet(pages_fts, 2, '', '', '…', 12) AS snip,
+                COALESCE(p.title, ''),
+                COALESCE(snippet(pages_fts, 2, '', '', '…', 12), '') AS snip,
                 COALESCE(p.domain, '') AS domain,
                 COALESCE((SELECT u.safety FROM urls u WHERE u.url = p.url), 'unknown') AS safety,
                 EXISTS(SELECT 1 FROM bookmarks b WHERE b.url = p.url) AS bookmarked
@@ -91,7 +107,8 @@ pub fn search(
          LIMIT 30 OFFSET ?2",
     )?;
 
-    let rows = stmt.query_map(rusqlite::params![&match_query, offset as i64], |row| {
+    let offset = i64::try_from(offset).unwrap_or(i64::MAX);
+    let rows = stmt.query_map(rusqlite::params![&match_query, offset], |row| {
         Ok(SearchResult {
             url: row.get(0)?,
             title: row.get(1)?,
@@ -144,6 +161,11 @@ pub fn get_page(conn: &Connection, url: &str) -> Result<Option<PageView>, rusqli
         return Ok(None);
     };
 
+    // Older database rows must receive the current sanitizer too.
+    page.content_html = url_for_reader(&page.url)
+        .map(|base| crawler_rs::parser::sanitize_html(&page.content_html, &base))
+        .unwrap_or_default();
+
     page.images = database::images_of_page(conn, id)?
         .into_iter()
         .map(|i| ImageRef {
@@ -163,6 +185,10 @@ pub fn get_page(conn: &Connection, url: &str) -> Result<Option<PageView>, rusqli
         .collect();
 
     Ok(Some(page))
+}
+
+fn url_for_reader(value: &str) -> Option<url::Url> {
+    network::validate_url(value).ok()
 }
 
 // --- Signets -------------------------------------------------------------
@@ -232,4 +258,53 @@ fn fts_query(query: &str) -> String {
         return String::new();
     }
     terms.join(" OR ")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fixture() -> (tempfile::TempDir, Connection) {
+        let dir = tempfile::tempdir().unwrap();
+        let conn = database::init_in(dir.path()).unwrap();
+        conn.execute(
+            "INSERT INTO pages(url, title, content, content_html) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![
+                "https://example.com/guide",
+                "Rust guide",
+                "Rust crawler tutorial",
+                "<script>alert(1)</script><img src='/pic.png' onerror='alert(1)'><p>Rust</p>"
+            ],
+        )
+        .unwrap();
+        (dir, conn)
+    }
+
+    #[test]
+    fn search_returns_results_and_handles_quoted_input_and_large_offsets() {
+        let (_dir, conn) = fixture();
+        assert_eq!(search(&conn, "Rust", 0).unwrap().len(), 1);
+        assert!(search(&conn, "\" OR title:other", 0).is_ok());
+        assert!(search(&conn, "Rust", usize::MAX).unwrap().is_empty());
+    }
+
+    #[test]
+    fn historical_html_is_sanitized_before_display() {
+        let (_dir, conn) = fixture();
+        let page = get_page(&conn, "https://example.com/guide")
+            .unwrap()
+            .unwrap();
+        assert!(!page.content_html.contains("<script"));
+        assert!(!page.content_html.contains("onerror"));
+        assert!(page.content_html.contains("data-src="));
+        assert!(!page.content_html.contains("<img src="));
+    }
+
+    #[test]
+    fn nullable_legacy_titles_do_not_break_search() {
+        let (_dir, conn) = fixture();
+        conn.execute("UPDATE pages SET title = NULL", []).unwrap();
+        let rows = search(&conn, "Rust", 0).unwrap();
+        assert_eq!(rows[0].title, "");
+    }
 }

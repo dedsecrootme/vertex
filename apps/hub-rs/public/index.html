@@ -44,25 +44,25 @@
     <div class="row">
       <span id="who" class="mut">Non connecté</span>
       <span class="sp"></span>
-      <button class="btn" id="btnLogin">Se connecter</button>
-      <button class="btn p" id="btnRegister">Créer un compte</button>
-      <button class="btn d" id="btnLogout" style="display:none">Déconnexion</button>
+      <button type="button" class="btn" id="btnLogin">Se connecter</button>
+      <button type="button" class="btn p" id="btnRegister">Créer un compte</button>
+      <button type="button" class="btn d" id="btnLogout" style="display:none">Déconnexion</button>
     </div>
     <div id="authForms" style="display:none;margin-top:.7rem">
       <div class="row">
-        <input id="aUser" placeholder="pseudo" style="max-width:220px">
-        <input id="aPass" type="password" placeholder="mot de passe (10+ caractères)" style="max-width:280px">
-        <button class="btn p" id="aGo">Valider</button>
+        <input type="text" id="aUser" placeholder="pseudo" style="max-width:220px">
+        <input id="aPass" type="password" autocomplete="current-password" placeholder="mot de passe (10+ caractères)" style="max-width:280px">
+        <button type="button" class="btn p" id="aGo">Valider</button>
       </div>
       <p class="mut" id="authMsg" style="margin:.5rem 0 0"></p>
     </div>
   </div>
 
   <div class="tabs">
-    <button class="tab on" data-tab="chat">💬 Chat</button>
-    <button class="tab" data-tab="forum">🗂️ Forums</button>
-    <button class="tab" data-tab="reviews">⭐ Avis</button>
-    <button class="tab" data-tab="ads">📣 Partenaires</button>
+    <button type="button" class="tab on" data-tab="chat">💬 Chat</button>
+    <button type="button" class="tab" data-tab="forum">🗂️ Forums</button>
+    <button type="button" class="tab" data-tab="reviews">⭐ Avis</button>
+    <button type="button" class="tab" data-tab="ads">📣 Partenaires</button>
   </div>
 
   <section id="p-chat">
@@ -74,8 +74,8 @@
       </div>
       <div id="msgs"></div>
       <div class="row" style="margin-top:.6rem">
-        <input id="chatInput" placeholder="Votre message…">
-        <button class="btn p" id="chatSend">Envoyer</button>
+        <input type="text" id="chatInput" placeholder="Votre message…">
+        <button type="button" class="btn p" id="chatSend">Envoyer</button>
       </div>
     </div>
   </section>
@@ -128,6 +128,7 @@ async function refreshMe() {
 let authMode = 'login';
 function showAuth(mode) {
   authMode = mode;
+  $('#aPass').autocomplete = mode === 'login' ? 'current-password' : 'new-password';
   $('#authForms').style.display = '';
   $('#aGo').textContent = mode === 'login' ? 'Se connecter' : 'Créer le compte';
   $('#authMsg').textContent = '';

@@ -1,49 +1,20 @@
-//! Authentification et primitives cryptographiques **maison**.
+//! Authentication using maintained password derivation and system randomness.
 //!
-//! - **Aléa** : API Windows `BCryptGenRandom` via FFI (aucune dépendance).
-//! - **Dérivation de mot de passe** : PBKDF2-HMAC-SHA256 (norme PKCS#5 publique)
-//!   implémenté à la main, 200 000 itérations.
+//! - System randomness through getrandom on every supported platform.
+//! - Password derivation: PBKDF2-HMAC-SHA256, 600 000 iterations.
 //! - **Jetons de session** : 256 bits d'aléa, encodés en hexadécimal.
 //! - Comparaisons **à temps constant** (pas de fuite par timing).
 
-use sha2::{Digest, Sha256};
-
-#[cfg(windows)]
-mod win {
-    use std::ffi::c_void;
-
-    #[link(name = "bcrypt")]
-    unsafe extern "system" {
-        fn BCryptGenRandom(alg: *mut c_void, buffer: *mut u8, len: u32, flags: u32) -> i32;
-    }
-
-    /// Remplit `buf` avec de l'aléa cryptographique du système.
-    pub fn fill(buf: &mut [u8]) -> bool {
-        const BCRYPT_USE_SYSTEM_PREFERRED_RNG: u32 = 0x0000_0002;
-        let status = unsafe {
-            BCryptGenRandom(
-                std::ptr::null_mut(),
-                buf.as_mut_ptr(),
-                buf.len() as u32,
-                BCRYPT_USE_SYSTEM_PREFERRED_RNG,
-            )
-        };
-        status == 0
-    }
-}
+use sha2::Sha256;
+use subtle::ConstantTimeEq;
 
 /// Nombre d'itérations PBKDF2.
-pub const PBKDF2_ITERATIONS: u32 = 200_000;
+pub const PBKDF2_ITERATIONS: u32 = 600_000;
 
 /// Octets aléatoires cryptographiques (échec = arrêt immédiat, jamais de zéros).
 pub fn random_bytes(len: usize) -> Vec<u8> {
     let mut buf = vec![0u8; len];
-    #[cfg(windows)]
-    {
-        if !win::fill(&mut buf) {
-            panic!("Générateur aléatoire du système indisponible");
-        }
-    }
+    getrandom::getrandom(&mut buf).expect("Générateur aléatoire du système indisponible");
     buf
 }
 
@@ -58,7 +29,7 @@ pub fn hex(bytes: &[u8]) -> String {
 
 fn hex_decode(text: &str) -> Vec<u8> {
     let bytes = text.as_bytes();
-    if bytes.len() % 2 != 0 {
+    if !bytes.len().is_multiple_of(2) {
         return Vec::new();
     }
     let mut out = Vec::with_capacity(bytes.len() / 2);
@@ -74,63 +45,16 @@ fn hex_decode(text: &str) -> Vec<u8> {
     out
 }
 
-/// HMAC-SHA256 (RFC 2104) — implémentation maison sur la primitive SHA-256.
-fn hmac_sha256(key: &[u8], message: &[u8]) -> [u8; 32] {
-    const BLOCK: usize = 64;
-    let mut block_key = [0u8; BLOCK];
-    if key.len() > BLOCK {
-        let mut hasher = Sha256::new();
-        hasher.update(key);
-        block_key[..32].copy_from_slice(&hasher.finalize());
-    } else {
-        block_key[..key.len()].copy_from_slice(key);
-    }
-
-    let mut inner_pad = [0x36u8; BLOCK];
-    let mut outer_pad = [0x5cu8; BLOCK];
-    for i in 0..BLOCK {
-        inner_pad[i] ^= block_key[i];
-        outer_pad[i] ^= block_key[i];
-    }
-
-    let mut inner = Sha256::new();
-    inner.update(inner_pad);
-    inner.update(message);
-    let inner = inner.finalize();
-
-    let mut outer = Sha256::new();
-    outer.update(outer_pad);
-    outer.update(inner);
-    outer.finalize().into()
-}
-
 /// PBKDF2-HMAC-SHA256, longueur dérivée 32 octets (un seul bloc).
 pub fn pbkdf2_sha256(password: &[u8], salt: &[u8], iterations: u32) -> [u8; 32] {
-    let mut block = Vec::with_capacity(salt.len() + 4);
-    block.extend_from_slice(salt);
-    block.extend_from_slice(&1u32.to_be_bytes());
-
-    let mut u = hmac_sha256(password, &block);
-    let mut result = u;
-    for _ in 1..iterations.max(1) {
-        u = hmac_sha256(password, &u);
-        for i in 0..32 {
-            result[i] ^= u[i];
-        }
-    }
+    let mut result = [0; 32];
+    pbkdf2::pbkdf2_hmac::<Sha256>(password, salt, iterations, &mut result);
     result
 }
 
 /// Compare deux tranches en temps constant.
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
-    if a.len() != b.len() {
-        return false;
-    }
-    let mut diff = 0u8;
-    for i in 0..a.len() {
-        diff |= a[i] ^ b[i];
-    }
-    diff == 0
+    bool::from(a.ct_eq(b))
 }
 
 /// Dérive la représentation stockée d'un mot de passe :
@@ -155,6 +79,9 @@ pub fn verify_password(password: &str, stored: &str) -> bool {
     let Ok(iterations) = parts[1].parse::<u32>() else {
         return false;
     };
+    if !(1..=10_000_000).contains(&iterations) {
+        return false;
+    }
     let salt = hex_decode(parts[2]);
     let expected = hex_decode(parts[3]);
     if salt.is_empty() || expected.len() != 32 {

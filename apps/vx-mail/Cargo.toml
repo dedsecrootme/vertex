@@ -5,8 +5,7 @@ edition = "2024"
 
 # vx-mail — messagerie **maison** de Vertex.
 #
-# * MIME : en-têtes repliés, multipart, base64 et quoted-printable (tout écrit
-#   à la main, aucune dépendance) ;
-# * composition de messages (RFC 5322) ;
-# * à venir : transport IMAP/SMTP sur le TLS de vx-sys.
+# * Helpers base64 (bibliotheque maintenue) et quoted-printable ;
+# * a venir : en-tetes, multipart, composition et transport IMAP/SMTP.
 [dependencies]
+base64 = "0.22"

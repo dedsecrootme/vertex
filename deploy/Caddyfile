@@ -1,0 +1,13 @@
+# VERTEX_HOST must match the host in VERTEX_PUBLIC_ORIGIN.
+# Only Caddy is exposed on ports 80/443. Vertex remains on loopback.
+{$VERTEX_HOST} {
+    encode zstd gzip
+    request_body {
+        max_size 16KB
+    }
+    reverse_proxy 127.0.0.1:3000 {
+        transport http {
+            response_header_timeout 25s
+        }
+    }
+}

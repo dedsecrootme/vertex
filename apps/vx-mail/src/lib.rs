@@ -1,68 +1,24 @@
-//! vx-mail — messagerie **maison** de Vertex (aucune dépendance).
+//! vx-mail — helpers MIME de Vertex.
 //!
-//! Contient l'encodage MIME nécessaire à un vrai client de courriel :
-//! **base64**, **quoted-printable**, analyse des **en-têtes repliés**, séparation
-//! **multipart** et composition de messages (RFC 5322). Le transport IMAP/SMTP
-//! s'appuiera sur le TLS de `vx-sys`.
+//! Contains base64 and quoted-printable helpers. Header parsing, multipart,
+//! message composition and IMAP/SMTP transport are not implemented yet.
 //!
 //! Conformément à la politique du projet : **aucun journal**, rien n'est
 //! transmis ailleurs, les identifiants viennent du coffre-fort (`vx-vault`).
 
-const BASE64_TABLE: &[u8; 64] =
-    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+use base64::Engine;
 
 /// Encode des octets en base64 (sans retour à la ligne).
 pub fn base64_encode(data: &[u8]) -> String {
-    let mut out = String::with_capacity(data.len().div_ceil(3) * 4);
-    for chunk in data.chunks(3) {
-        let b0 = chunk[0] as u32;
-        let b1 = *chunk.get(1).unwrap_or(&0) as u32;
-        let b2 = *chunk.get(2).unwrap_or(&0) as u32;
-        let packed = (b0 << 16) | (b1 << 8) | b2;
-
-        out.push(BASE64_TABLE[((packed >> 18) & 63) as usize] as char);
-        out.push(BASE64_TABLE[((packed >> 12) & 63) as usize] as char);
-        out.push(if chunk.len() > 1 {
-            BASE64_TABLE[((packed >> 6) & 63) as usize] as char
-        } else {
-            '='
-        });
-        out.push(if chunk.len() > 2 {
-            BASE64_TABLE[(packed & 63) as usize] as char
-        } else {
-            '='
-        });
-    }
-    out
+    base64::engine::general_purpose::STANDARD.encode(data)
 }
 
 /// Décode du base64 (les espaces et sauts de ligne sont ignorés).
 pub fn base64_decode(text: &str) -> Result<Vec<u8>, String> {
-    let mut out = Vec::with_capacity(text.len() / 4 * 3);
-    let mut buffer: u32 = 0;
-    let mut bits: u32 = 0;
-
-    for byte in text.bytes() {
-        if matches!(byte, b'=' | b'\r' | b'\n' | b' ' | b'\t') {
-            continue;
-        }
-        let value = match byte {
-            b'A'..=b'Z' => byte - b'A',
-            b'a'..=b'z' => byte - b'a' + 26,
-            b'0'..=b'9' => byte - b'0' + 52,
-            b'+' => 62,
-            b'/' => 63,
-            other => return Err(format!("caractère base64 invalide : {}", other as char)),
-        } as u32;
-
-        buffer = (buffer << 6) | value;
-        bits += 6;
-        if bits >= 8 {
-            bits -= 8;
-            out.push((buffer >> bits) as u8);
-        }
-    }
-    Ok(out)
+    let input: Vec<u8> = text.bytes().filter(|b| !b.is_ascii_whitespace()).collect();
+    base64::engine::general_purpose::STANDARD
+        .decode(input)
+        .map_err(|e| e.to_string())
 }
 
 /// Décode du **quoted-printable** (RFC 2045), y compris les sauts souples.
@@ -96,4 +52,31 @@ pub fn quoted_printable_decode(text: &str) -> String {
     }
 
     String::from_utf8_lossy(&out).to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mime_base64_roundtrips_binary_and_whitespace() {
+        let bytes = [0, 255, 128, 42];
+        assert_eq!(base64_decode(&base64_encode(&bytes)).unwrap(), bytes);
+        assert_eq!(base64_decode("Zm9v\r\nYmFy").unwrap(), b"foobar");
+    }
+
+    #[test]
+    fn rejects_malformed_base64_instead_of_returning_partial_data() {
+        for text in ["A", "AA=A", "Zm9v=garbage", "####", "Zh=="] {
+            assert!(base64_decode(text).is_err(), "{text}");
+        }
+    }
+
+    #[test]
+    fn quoted_printable_handles_soft_line_breaks_and_utf8() {
+        assert_eq!(
+            quoted_printable_decode("caf=C3=A9=\r\n suite"),
+            "café suite"
+        );
+    }
 }

@@ -107,7 +107,7 @@ unsafe extern "system" {
 }
 
 /// PBKDF2-HMAC-SHA256 dérivé par CNG (`BCryptDeriveKeyPBKDF2`).
-/// `iterations` : 200 000 recommandé pour un mot de passe maître.
+/// `iterations` : 600 000 par defaut pour les nouveaux coffres.
 pub fn pbkdf2_sha256(
     password: &[u8],
     salt: &[u8],
@@ -119,13 +119,21 @@ pub fn pbkdf2_sha256(
 
     let mut prf: *mut c_void = std::ptr::null_mut();
     let status = unsafe {
-        BCryptOpenAlgorithmProvider(&mut prf, alg_name.as_ptr(), std::ptr::null(), BCRYPT_ALG_HANDLE_HMAC_FLAG)
+        BCryptOpenAlgorithmProvider(
+            &mut prf,
+            alg_name.as_ptr(),
+            std::ptr::null(),
+            BCRYPT_ALG_HANDLE_HMAC_FLAG,
+        )
     };
     if status != 0 {
-        return Err(status_error("BCryptOpenAlgorithmProvider(HMAC-SHA256)", status));
+        return Err(status_error(
+            "BCryptOpenAlgorithmProvider(HMAC-SHA256)",
+            status,
+        ));
     }
 
-    let mut password = password.to_vec();
+    let mut password = zeroize::Zeroizing::new(password.to_vec());
     let mut salt = salt.to_vec();
     let mut derived = vec![0u8; out_len];
     let status = unsafe {
@@ -149,7 +157,7 @@ pub fn pbkdf2_sha256(
 }
 
 /// Itérations par défaut pour un mot de passe maître.
-pub const DEFAULT_PBKDF2_ITERATIONS: u64 = 200_000;
+pub const DEFAULT_PBKDF2_ITERATIONS: u64 = 600_000;
 
 /// Clé symétrique AES-256 en mode GCM.
 pub struct AesGcmKey {
@@ -200,7 +208,7 @@ impl AesGcmKey {
         }
 
         let mut handle: *mut c_void = std::ptr::null_mut();
-        let mut secret = *key;
+        let mut secret = zeroize::Zeroizing::new(*key);
         let status = unsafe {
             BCryptGenerateSymmetricKey(
                 algorithm,
@@ -252,7 +260,7 @@ impl AesGcmKey {
             flags: 0,
         };
 
-        let mut input = plaintext.to_vec();
+        let mut input = zeroize::Zeroizing::new(plaintext.to_vec());
         let mut output = vec![0u8; plaintext.len()];
         let mut written: u32 = 0;
         let status = unsafe {
@@ -358,20 +366,29 @@ mod tests {
         let (ciphertext, tag) = cipher.encrypt(&nonce, b"", &plaintext).expect("encrypt");
         assert_eq!(hex(&ciphertext), "cea7403d4d606b6e074ec5d3baf39d18");
         assert_eq!(hex(&tag), "d0d1c8a799996bf0265b98b5d48ab919");
-        assert_eq!(cipher.decrypt(&nonce, b"", &ciphertext, &tag).expect("decrypt"), plaintext);
+        assert_eq!(
+            cipher
+                .decrypt(&nonce, b"", &ciphertext, &tag)
+                .expect("decrypt"),
+            plaintext
+        );
     }
 
     /// Vecteur NIST GCM, cas de test 15 (avec données associées).
     #[test]
     fn nist_gcm_test_case_15_with_aad() {
         let mut key = [0u8; 32];
-        key.copy_from_slice(&unhex("feffe9928665731c6d6a8f9467308308feffe9928665731c6d6a8f9467308308"));
+        key.copy_from_slice(&unhex(
+            "feffe9928665731c6d6a8f9467308308feffe9928665731c6d6a8f9467308308",
+        ));
         let cipher = AesGcmKey::new(&key).expect("cle");
 
         let mut nonce = [0u8; 12];
         nonce.copy_from_slice(&unhex("cafebabefacedbaddecaf888"));
 
-        let plaintext = unhex("d9313225f88406e5a55909c5aff5269a86a7a9531534f7da2e4c303d8a318a721c3c0c95956809532fcf0e2449a6b525b16aedf5aa0de657ba637b39");
+        let plaintext = unhex(
+            "d9313225f88406e5a55909c5aff5269a86a7a9531534f7da2e4c303d8a318a721c3c0c95956809532fcf0e2449a6b525b16aedf5aa0de657ba637b39",
+        );
         let aad = unhex("feedfacedeadbeeffeedfacedeadbeefabaddad2");
 
         let (ciphertext, tag) = cipher.encrypt(&nonce, &aad, &plaintext).expect("encrypt");
@@ -380,7 +397,12 @@ mod tests {
             "522dc1f099567d07f47f37a32a84427d643a8cdcbfe5c0c97598a2bd2555d1aa8cb08e48590dbb3da7b08b1056828838c5f61e6393ba7a0abcc9f662"
         );
         assert_eq!(hex(&tag), "76fc6ece0f4e1768cddf8853bb2d551b");
-        assert_eq!(cipher.decrypt(&nonce, &aad, &ciphertext, &tag).expect("decrypt"), plaintext);
+        assert_eq!(
+            cipher
+                .decrypt(&nonce, &aad, &ciphertext, &tag)
+                .expect("decrypt"),
+            plaintext
+        );
     }
 
     /// Toute altération est détectée.
@@ -389,11 +411,23 @@ mod tests {
         let cipher = AesGcmKey::new(&[7u8; 32]).expect("cle");
         let nonce = [1u8; 12];
 
-        let (mut ciphertext, tag) = cipher.encrypt(&nonce, b"entete", b"message secret").expect("encrypt");
+        let (mut ciphertext, tag) = cipher
+            .encrypt(&nonce, b"entete", b"message secret")
+            .expect("encrypt");
         ciphertext[0] ^= 0xFF;
-        assert!(cipher.decrypt(&nonce, b"entete", &ciphertext, &tag).is_err());
+        assert!(
+            cipher
+                .decrypt(&nonce, b"entete", &ciphertext, &tag)
+                .is_err()
+        );
 
-        let (ciphertext, tag) = cipher.encrypt(&nonce, b"entete", b"message secret").expect("encrypt");
-        assert!(cipher.decrypt(&nonce, b"entete-modifie", &ciphertext, &tag).is_err());
+        let (ciphertext, tag) = cipher
+            .encrypt(&nonce, b"entete", b"message secret")
+            .expect("encrypt");
+        assert!(
+            cipher
+                .decrypt(&nonce, b"entete-modifie", &ciphertext, &tag)
+                .is_err()
+        );
     }
 }

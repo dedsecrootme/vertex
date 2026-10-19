@@ -13,7 +13,7 @@ use std::time::Duration;
 use crate::models::Page;
 
 /// Version courante du schéma (stockée dans la table `meta`).
-pub const SCHEMA_VERSION: i64 = 2;
+pub const SCHEMA_VERSION: i64 = 6;
 
 /// Racine du workspace Vertex.
 pub fn workspace_root() -> PathBuf {
@@ -27,6 +27,9 @@ pub fn workspace_root() -> PathBuf {
 
 /// Dossier SQLite utilisé par défaut (`<workspace>/database`).
 pub fn default_db_dir() -> PathBuf {
+    if let Some(dir) = std::env::var_os("VERTEX_DB_DIR").filter(|dir| !dir.is_empty()) {
+        return PathBuf::from(dir);
+    }
     workspace_root().join("database")
 }
 
@@ -51,6 +54,7 @@ CREATE TABLE IF NOT EXISTS urls (
     depth       INTEGER NOT NULL DEFAULT 0,
     priority    INTEGER NOT NULL DEFAULT 0,
     attempts    INTEGER NOT NULL DEFAULT 0,
+    next_attempt INTEGER NOT NULL DEFAULT 0,
     error       TEXT,
     safety      TEXT NOT NULL DEFAULT 'unknown',
     created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -140,8 +144,6 @@ CREATE TABLE IF NOT EXISTS errors (
 );
 "#;
 
-
-
 /// Index créés **après** les migrations (les colonnes existent alors forcément).
 const SCHEMA_INDEXES: &str = r#"
 CREATE INDEX IF NOT EXISTS idx_urls_status   ON urls(status);
@@ -154,6 +156,13 @@ CREATE INDEX IF NOT EXISTS idx_pages_hash    ON pages(content_hash);
 CREATE INDEX IF NOT EXISTS idx_links_page    ON links(page_id);
 CREATE INDEX IF NOT EXISTS idx_links_url     ON links(url);
 CREATE INDEX IF NOT EXISTS idx_images_page   ON images(page_id);
+CREATE INDEX IF NOT EXISTS idx_images_url    ON images(url);
+CREATE INDEX IF NOT EXISTS idx_pages_favicon ON pages(favicon);
+CREATE INDEX IF NOT EXISTS idx_urls_schedule ON urls(status, next_attempt, depth, priority);
+CREATE INDEX IF NOT EXISTS idx_urls_claim ON urls(priority DESC, id ASC)
+WHERE status='pending' AND safety!='malicious' AND attempts<3;
+CREATE INDEX IF NOT EXISTS idx_urls_retry_exhausted ON urls(id)
+WHERE status='pending' AND attempts>=3;
 "#;
 
 /// Initialise la base par défaut.
@@ -163,7 +172,7 @@ pub fn init() -> Result<Connection> {
 
 /// Ouvre/crée la base et applique le schéma + les migrations.
 pub fn init_in(db_dir: &Path) -> Result<Connection> {
-    fs::create_dir_all(db_dir).expect("Impossible de créer le dossier de base de données");
+    fs::create_dir_all(db_dir).map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
 
     let conn = Connection::open(db_dir.join("vertex.db"))?;
     conn.busy_timeout(Duration::from_secs(30))?;
@@ -171,14 +180,25 @@ pub fn init_in(db_dir: &Path) -> Result<Connection> {
         "PRAGMA journal_mode = WAL;
          PRAGMA foreign_keys = ON;
          PRAGMA synchronous = NORMAL;
-         PRAGMA temp_store = MEMORY;",
+         PRAGMA temp_store = MEMORY;
+         PRAGMA cache_size = -32768;
+         PRAGMA journal_size_limit = 67108864;
+         PRAGMA analysis_limit = 1000;",
     )?;
     conn.execute_batch(SCHEMA_MAIN)?;
     conn.execute_batch(SCHEMA_AUX)?;
 
     migrate(&conn)?;
     conn.execute_batch(SCHEMA_INDEXES)?;
-    ensure_fts(&conn)?;
+    let previously_verified: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM meta WHERE key='schema_version' AND CAST(value AS INTEGER)>=5) AND EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='pages_fts')",
+        [], |r| r.get(0))?;
+    if previously_verified {
+        install_fts(&conn)?;
+    } else {
+        ensure_fts(&conn)?;
+    }
+    crate::monitor::install(&conn)?;
 
     conn.execute(
         "INSERT INTO meta(key, value) VALUES ('schema_version', ?1)
@@ -212,6 +232,7 @@ fn migrate(conn: &Connection) -> Result<()> {
         ("depth", "INTEGER NOT NULL DEFAULT 0"),
         ("priority", "INTEGER NOT NULL DEFAULT 0"),
         ("attempts", "INTEGER NOT NULL DEFAULT 0"),
+        ("next_attempt", "INTEGER NOT NULL DEFAULT 0"),
         ("error", "TEXT"),
         ("safety", "TEXT NOT NULL DEFAULT 'unknown'"),
     ] {
@@ -220,6 +241,7 @@ fn migrate(conn: &Connection) -> Result<()> {
 
     for (col, decl) in [
         ("domain", "TEXT"),
+        ("content", "TEXT DEFAULT ''"),
         ("content_html", "TEXT DEFAULT ''"),
         ("content_type", "TEXT"),
         ("language", "TEXT"),
@@ -234,7 +256,7 @@ fn migrate(conn: &Connection) -> Result<()> {
 }
 
 /// Crée et maintient l'index FTS5 (reconstruit s'il est désynchronisé).
-fn ensure_fts(conn: &Connection) -> Result<()> {
+fn install_fts(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE VIRTUAL TABLE IF NOT EXISTS pages_fts USING fts5(
             url UNINDEXED,
@@ -262,11 +284,26 @@ fn ensure_fts(conn: &Connection) -> Result<()> {
          END;",
     )?;
 
-    let pages_count: i64 = conn.query_row("SELECT COUNT(*) FROM pages", [], |r| r.get(0))?;
-    let fts_count: i64 = conn.query_row("SELECT COUNT(*) FROM pages_fts", [], |r| r.get(0))?;
-    if pages_count != fts_count {
-        println!("Synchronisation FTS5 : {pages_count} pages / {fts_count} documents.");
-        conn.execute("INSERT INTO pages_fts(pages_fts) VALUES ('rebuild')", [])?;
+    Ok(())
+}
+
+pub fn ensure_fts(conn: &Connection) -> Result<()> {
+    install_fts(conn)?;
+    // COUNT(*) on an external-content FTS table reads pages, not the index.
+    if let Err(error) = conn.execute(
+        "INSERT INTO pages_fts(pages_fts, rank) VALUES ('integrity-check', 1)",
+        [],
+    ) {
+        if matches!(&error, rusqlite::Error::SqliteFailure(code, _) if code.code == rusqlite::ErrorCode::DatabaseCorrupt)
+        {
+            conn.execute("INSERT INTO pages_fts(pages_fts) VALUES ('rebuild')", [])?;
+            conn.execute(
+                "INSERT INTO pages_fts(pages_fts, rank) VALUES ('integrity-check', 1)",
+                [],
+            )?;
+        } else {
+            return Err(error);
+        }
     }
     Ok(())
 }
@@ -298,6 +335,61 @@ pub fn enqueue(conn: &Connection, url: &str, depth: i64, priority: i64) -> Resul
 /// Compatibilité : ajoute une URL racine (profondeur 0, priorité normale).
 pub fn add_url(conn: &Connection, url: &str) -> Result<()> {
     enqueue(conn, url, 0, 0).map(|_| ())
+}
+
+/// Shared discovery never overwrites content or exposes private client tables.
+pub fn request_indexing(conn: &Connection, url: &str) -> Result<&'static str> {
+    let tx = conn.unchecked_transaction()?;
+    let fresh: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pages WHERE url=?1 AND crawled_at >= datetime('now','-1 day'))",
+        [url], |r| r.get(0),
+    )?;
+    if fresh {
+        return Ok("ready");
+    }
+    let existing: Option<(String, bool)> = tx
+        .query_row(
+            "SELECT status, updated_at > datetime('now','-1 day') FROM urls WHERE url=?1",
+            [url],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?;
+    match existing
+        .as_ref()
+        .map(|(status, recent)| (status.as_str(), *recent))
+    {
+        Some(("crawling", _)) => return Ok("processing"),
+        Some(("pending", _)) => return Ok("queued"),
+        Some(("blocked" | "skipped", _)) => return Ok("blocked"),
+        Some(("failed", true)) => return Ok("deferred"),
+        _ => {}
+    }
+    let pending: i64 = tx.query_row(
+        "SELECT count(*) FROM urls WHERE status IN ('pending','crawling')",
+        [],
+        |r| r.get(0),
+    )?;
+    if pending >= 100_000 {
+        return Ok("full");
+    }
+    if existing.is_some() {
+        tx.execute("UPDATE urls SET status='pending', attempts=0, next_attempt=0, depth=0, priority=20, error=NULL, updated_at=CURRENT_TIMESTAMP WHERE url=?1", [url])?;
+    } else {
+        enqueue(&tx, url, 0, 20)?;
+    }
+    tx.commit()?;
+    Ok("queued")
+}
+
+/// Only successful, stale pages are scheduled again; failed sites keep a cooldown.
+pub fn schedule_stale(conn: &Connection, age_secs: u64, limit: usize) -> Result<usize> {
+    conn.execute(
+        "UPDATE urls SET status='pending', attempts=0, next_attempt=0, depth=0, updated_at=CURRENT_TIMESTAMP
+         WHERE id IN (SELECT u.id FROM urls u JOIN pages p ON p.url=u.url
+         WHERE u.status='done' AND p.crawled_at < datetime('now', ?1)
+         ORDER BY p.crawled_at LIMIT ?2)",
+        rusqlite::params![format!("-{} seconds", age_secs.max(3600)), limit.min(1000) as i64],
+    )
 }
 
 /// Vrai si l'URL est déjà connue.
@@ -387,7 +479,7 @@ pub fn reset_crawling(conn: &Connection) -> Result<()> {
 /// (Re)programme des URL échouées pour une nouvelle tentative.
 pub fn requeue_failed(conn: &Connection) -> Result<usize> {
     let n = conn.execute(
-        "UPDATE urls SET status = 'pending', updated_at = CURRENT_TIMESTAMP
+        "UPDATE urls SET status = 'pending', attempts = 0, next_attempt = 0, updated_at = CURRENT_TIMESTAMP
          WHERE status = 'failed'",
         [],
     )?;
@@ -395,7 +487,13 @@ pub fn requeue_failed(conn: &Connection) -> Result<usize> {
 }
 
 /// Enregistre le verdict de sûreté d'une URL (cache).
-pub fn set_url_safety(conn: &Connection, url: &str, verdict: &str, score: i64, reasons: &str) -> Result<()> {
+pub fn set_url_safety(
+    conn: &Connection,
+    url: &str,
+    verdict: &str,
+    score: i64,
+    reasons: &str,
+) -> Result<()> {
     conn.execute(
         "INSERT INTO url_safety(url, verdict, score, reasons) VALUES (?1, ?2, ?3, ?4)
          ON CONFLICT(url) DO UPDATE SET
@@ -410,24 +508,23 @@ pub fn set_url_safety(conn: &Connection, url: &str, verdict: &str, score: i64, r
 
 /// Nombre d'URL selon leur statut.
 pub fn count_urls_by_status(conn: &Connection, status: &str) -> Result<i64> {
-    conn.query_row(
-        "SELECT COUNT(*) FROM urls WHERE status = ?1",
-        [status],
-        |row| row.get(0),
-    )
+    crate::monitor::count(conn, &format!("urls:{status}"))
 }
 
 /// Nombre total d'URL connues.
 pub fn count_urls(conn: &Connection) -> Result<i64> {
-    conn.query_row("SELECT COUNT(*) FROM urls", [], |row| row.get(0))
+    conn.query_row(
+        "SELECT coalesce(sum(value),0) FROM monitor_counts WHERE key LIKE 'urls:%'",
+        [],
+        |r| r.get(0),
+    )
 }
 
 /// Remplit la colonne `domain` des URL créées avant la migration v2.
 /// Traite au plus `limit` lignes par appel pour ne pas bloquer indéfiniment.
 pub fn backfill_domains(conn: &Connection, limit: usize) -> Result<usize> {
     let rows: Vec<(i64, String)> = {
-        let mut stmt =
-            conn.prepare("SELECT id, url FROM urls WHERE domain IS NULL LIMIT ?1")?;
+        let mut stmt = conn.prepare("SELECT id, url FROM urls WHERE domain IS NULL LIMIT ?1")?;
         stmt.query_map([limit as i64], |r| Ok((r.get(0)?, r.get(1)?)))?
             .filter_map(std::result::Result::ok)
             .collect()
@@ -457,7 +554,7 @@ pub fn backfill_domains(conn: &Connection, limit: usize) -> Result<usize> {
 /// Nombre de domaines distincts connus.
 pub fn count_domains(conn: &Connection) -> Result<i64> {
     conn.query_row(
-        "SELECT COUNT(DISTINCT domain) FROM urls WHERE domain IS NOT NULL AND domain != ''",
+        "SELECT COUNT(*) FROM monitor_domains WHERE refs>0",
         [],
         |row| row.get(0),
     )
@@ -489,13 +586,53 @@ pub fn save_error(conn: &Connection, url: &str, error: &str) -> Result<()> {
 
 /// Identifiant d'une page à partir de son URL.
 pub fn page_id(conn: &Connection, url: &str) -> Result<Option<i64>> {
-    conn.query_row("SELECT id FROM pages WHERE url = ?1", [url], |row| row.get(0))
-        .optional()
+    conn.query_row("SELECT id FROM pages WHERE url = ?1", [url], |row| {
+        row.get(0)
+    })
+    .optional()
 }
 
 /// Enregistre (ou met à jour) une page, ses liens complets et ses images.
 /// Renvoie l'identifiant interne de la page.
 pub fn save_page(conn: &Connection, page: &Page) -> Result<i64> {
+    let tx = conn.unchecked_transaction()?;
+    let id = save_page_inner(&tx, page)?;
+    tx.commit()?;
+    Ok(id)
+}
+
+/// Commits the page, FTS update and completed queue state together.
+pub fn save_crawled_page(conn: &Connection, page: &Page, http_code: u16) -> Result<i64> {
+    retry_busy(|| {
+        let tx =
+            rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)?;
+        let id = save_page_inner(&tx, page)?;
+        mark_crawled(&tx, &page.url, http_code)?;
+        tx.commit()?;
+        Ok(id)
+    })
+}
+
+// Retry only complete atomic writes, never an arbitrary partially completed operation.
+pub(crate) fn retry_busy<T>(mut operation: impl FnMut() -> Result<T>) -> Result<T> {
+    for attempt in 0..4 {
+        match operation() {
+            Err(rusqlite::Error::SqliteFailure(code, _))
+                if attempt < 3
+                    && matches!(
+                        code.code,
+                        rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked
+                    ) =>
+            {
+                std::thread::sleep(Duration::from_millis(25 * (attempt + 1)));
+            }
+            result => return result,
+        }
+    }
+    unreachable!()
+}
+
+fn save_page_inner(conn: &Connection, page: &Page) -> Result<i64> {
     conn.execute(
         "INSERT INTO pages (
             url, domain, title, description, content, content_html, content_hash,
@@ -535,29 +672,29 @@ pub fn save_page(conn: &Connection, page: &Page) -> Result<i64> {
         ],
     )?;
 
-    let id: i64 = conn.query_row("SELECT id FROM pages WHERE url = ?1", [&page.url], |r| r.get(0))?;
+    let id: i64 = conn.query_row("SELECT id FROM pages WHERE url = ?1", [&page.url], |r| {
+        r.get(0)
+    })?;
     conn.execute("DELETE FROM links WHERE page_id = ?1", [id])?;
     conn.execute("DELETE FROM images WHERE page_id = ?1", [id])?;
 
+    let mut insert_link = conn.prepare_cached(
+        "INSERT OR IGNORE INTO links(page_id, url, anchor, is_external, safety) VALUES (?1, ?2, ?3, ?4, ?5)",
+    )?;
     for link in &page.links {
-        conn.execute(
-            "INSERT OR IGNORE INTO links(page_id, url, anchor, is_external, safety)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-            rusqlite::params![
-                id,
-                link.url,
-                link.anchor,
-                link.is_external as i64,
-                link.safety
-            ],
-        )?;
+        insert_link.execute(rusqlite::params![
+            id,
+            link.url,
+            link.anchor,
+            link.is_external as i64,
+            link.safety
+        ])?;
     }
 
+    let mut insert_image =
+        conn.prepare_cached("INSERT OR IGNORE INTO images(page_id, url, alt) VALUES (?1, ?2, ?3)")?;
     for image in &page.images {
-        conn.execute(
-            "INSERT OR IGNORE INTO images(page_id, url, alt) VALUES (?1, ?2, ?3)",
-            rusqlite::params![id, image.url, image.alt],
-        )?;
+        insert_image.execute(rusqlite::params![id, image.url, image.alt])?;
     }
 
     Ok(id)
@@ -593,7 +730,7 @@ pub fn images_of_page(conn: &Connection, id: i64) -> Result<Vec<crate::models::P
 
 /// Nombre de pages indexées.
 pub fn count_pages(conn: &Connection) -> Result<i64> {
-    conn.query_row("SELECT COUNT(*) FROM pages", [], |row| row.get(0))
+    crate::monitor::count(conn, "pages")
 }
 
 // ---------------------------------------------------------------------------
@@ -723,7 +860,10 @@ pub fn contact_list(conn: &Connection) -> Result<Vec<ContactMessage>> {
 
 /// Marque un message comme lu.
 pub fn contact_mark_read(conn: &Connection, id: i64) -> Result<()> {
-    conn.execute("UPDATE contact_messages SET is_read = 1 WHERE id = ?1", [id])?;
+    conn.execute(
+        "UPDATE contact_messages SET is_read = 1 WHERE id = ?1",
+        [id],
+    )?;
     Ok(())
 }
 
@@ -798,5 +938,190 @@ pub fn stats(conn: &Connection) -> Result<DbStats> {
 
 /// Optimise la base (à appeler après un gros crawl).
 pub fn optimize(conn: &Connection) -> Result<()> {
-    conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE); PRAGMA optimize; ANALYZE;")
+    conn.execute_batch(
+        "PRAGMA wal_checkpoint(PASSIVE); PRAGMA analysis_limit=1000; PRAGMA optimize;",
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::{Page, PageImage};
+
+    fn db() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        conn.execute_batch(SCHEMA_MAIN).unwrap();
+        conn.execute_batch(SCHEMA_AUX).unwrap();
+        ensure_fts(&conn).unwrap();
+        crate::monitor::install(&conn).unwrap();
+        conn
+    }
+
+    fn page() -> Page {
+        Page {
+            url: "https://example.com/".into(),
+            domain: "example.com".into(),
+            status_code: 200,
+            title: "Guide".into(),
+            description: None,
+            content: "searchableword".into(),
+            content_html: "<p>Guide</p>".into(),
+            links: vec![],
+            images: vec![],
+            favicon: None,
+            content_hash: "hash".into(),
+            size: 10,
+            content_type: None,
+            language: None,
+            depth: 0,
+            crawl_time_ms: 1,
+        }
+    }
+
+    #[test]
+    fn discovery_is_deduplicated_and_fresh_pages_are_not_recrawled() {
+        let conn = db();
+        assert_eq!(
+            request_indexing(&conn, "https://example.com/").unwrap(),
+            "queued"
+        );
+        assert_eq!(
+            request_indexing(&conn, "https://example.com/").unwrap(),
+            "queued"
+        );
+        assert_eq!(count_urls_by_status(&conn, "pending").unwrap(), 1);
+        save_page(&conn, &page()).unwrap();
+        mark_crawled(&conn, "https://example.com/", 200).unwrap();
+        assert_eq!(
+            request_indexing(&conn, "https://example.com/").unwrap(),
+            "ready"
+        );
+        assert_eq!(count_urls_by_status(&conn, "pending").unwrap(), 0);
+        conn.execute("UPDATE pages SET crawled_at=datetime('now','-2 days')", [])
+            .unwrap();
+        assert_eq!(schedule_stale(&conn, 86400, 500).unwrap(), 1);
+        assert_eq!(schedule_stale(&conn, 86400, 500).unwrap(), 0);
+    }
+
+    #[test]
+    fn discovery_respects_blocked_and_recent_failure_states() {
+        let conn = db();
+        enqueue(&conn, "https://example.com/", 0, 0).unwrap();
+        mark_failed(&conn, "https://example.com/", "temporary").unwrap();
+        assert_eq!(
+            request_indexing(&conn, "https://example.com/").unwrap(),
+            "deferred"
+        );
+        conn.execute("UPDATE urls SET updated_at=datetime('now','-2 days')", [])
+            .unwrap();
+        assert_eq!(
+            request_indexing(&conn, "https://example.com/").unwrap(),
+            "queued"
+        );
+        mark_blocked(&conn, "https://example.com/", "policy").unwrap();
+        assert_eq!(
+            request_indexing(&conn, "https://example.com/").unwrap(),
+            "blocked"
+        );
+    }
+
+    #[test]
+    fn detects_and_repairs_an_empty_external_content_index() {
+        let conn = db();
+        conn.execute_batch("DROP TRIGGER pages_fts_ai;").unwrap();
+        save_page(&conn, &page()).unwrap();
+        let missing: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM pages_fts WHERE pages_fts MATCH 'searchableword'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(missing, 0);
+        ensure_fts(&conn).unwrap();
+        let found: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM pages_fts WHERE pages_fts MATCH 'searchableword'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(found, 1);
+    }
+
+    #[test]
+    fn failed_media_insert_rolls_back_page_and_index() {
+        let conn = db();
+        save_page(&conn, &page()).unwrap();
+        conn.execute_batch("CREATE TRIGGER reject_image BEFORE INSERT ON images BEGIN SELECT RAISE(ABORT, 'test failure'); END;").unwrap();
+        let mut update = page();
+        update.content = "replacementword".into();
+        update.images.push(PageImage {
+            url: "https://example.com/pic.png".into(),
+            alt: None,
+        });
+        assert!(save_page(&conn, &update).is_err());
+        let content: String = conn
+            .query_row("SELECT content FROM pages", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(content, "searchableword");
+        conn.execute(
+            "INSERT INTO pages_fts(pages_fts, rank) VALUES ('integrity-check', 1)",
+            [],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn crawled_page_and_queue_status_commit_or_rollback_together() {
+        let conn = db();
+        let page = page();
+        enqueue(&conn, &page.url, 0, 0).unwrap();
+        mark_crawling(&conn, &page.url).unwrap();
+        conn.execute_batch("CREATE TRIGGER reject_done BEFORE UPDATE OF status ON urls WHEN NEW.status='done' BEGIN SELECT RAISE(ABORT,'test failure'); END;").unwrap();
+        assert!(save_crawled_page(&conn, &page, 200).is_err());
+        assert_eq!(count_pages(&conn).unwrap(), 0);
+        assert_eq!(count_urls_by_status(&conn, "crawling").unwrap(), 1);
+        conn.execute_batch("DROP TRIGGER reject_done;").unwrap();
+        save_crawled_page(&conn, &page, 200).unwrap();
+        assert_eq!(count_pages(&conn).unwrap(), 1);
+        assert_eq!(count_urls_by_status(&conn, "done").unwrap(), 1);
+        conn.execute(
+            "INSERT INTO pages_fts(pages_fts,rank) VALUES('integrity-check',1)",
+            [],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn crawled_page_retries_a_temporary_external_writer_without_partial_results() {
+        let dir = std::env::temp_dir().join(format!("vertex-writer-retry-{}", std::process::id()));
+        let conn = init_in(&dir).unwrap();
+        let page = page();
+        enqueue(&conn, &page.url, 0, 0).unwrap();
+        mark_crawling(&conn, &page.url).unwrap();
+        conn.busy_timeout(Duration::from_millis(20)).unwrap();
+        let path = dir.join("vertex.db");
+        let (ready, waiting) = std::sync::mpsc::channel();
+        let writer = std::thread::spawn(move || {
+            let other = Connection::open(path).unwrap();
+            other.execute_batch("BEGIN IMMEDIATE;").unwrap();
+            ready.send(()).unwrap();
+            std::thread::sleep(Duration::from_millis(150));
+            other.execute_batch("COMMIT;").unwrap();
+        });
+        waiting.recv().unwrap();
+        save_crawled_page(&conn, &page, 200).unwrap();
+        writer.join().unwrap();
+        assert_eq!(count_pages(&conn).unwrap(), 1);
+        assert_eq!(count_urls_by_status(&conn, "done").unwrap(), 1);
+        conn.execute(
+            "INSERT INTO pages_fts(pages_fts,rank) VALUES('integrity-check',1)",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }

@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 # vx-sys — couche « plus bas niveau » de Vertex : FFI directe vers les
-# primitives du système Windows. **Aucune dépendance.**
+# primitives du système Windows ; zeroize efface les copies de secrets.
 #
 #   * CNG (bcrypt.dll) : aléa cryptographique, AES-256-GCM authentifié ;
 #   * SChannel (secur32.dll) : TLS client.
@@ -12,3 +12,4 @@ edition = "2024"
 # Rien n'est réimplémenté à la main côté cryptographie : on pilote les
 # primitives auditées du système, ce qui est le seul choix sûr.
 [dependencies]
+zeroize = "1"

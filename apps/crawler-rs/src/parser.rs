@@ -3,10 +3,43 @@
 
 use regex::Regex;
 use scraper::{Html, Selector};
-use std::sync::LazyLock;
+use std::sync::{Condvar, LazyLock, Mutex};
 use url::Url;
 
 use crate::models::{PageImage, PageLink};
+
+struct ParseBudget {
+    active: Mutex<usize>,
+    changed: Condvar,
+    limit: usize,
+}
+static PARSE_BUDGET: LazyLock<ParseBudget> = LazyLock::new(|| ParseBudget {
+    active: Mutex::new(0),
+    changed: Condvar::new(),
+    limit: std::thread::available_parallelism()
+        .map(|n| n.get().div_ceil(4))
+        .unwrap_or(1)
+        .clamp(1, 4),
+});
+struct ParsePermit(&'static ParseBudget);
+impl ParsePermit {
+    fn acquire() -> Self {
+        let budget = &*PARSE_BUDGET;
+        let active = budget.active.lock().unwrap_or_else(|e| e.into_inner());
+        let mut active = budget
+            .changed
+            .wait_while(active, |active| *active >= budget.limit)
+            .unwrap_or_else(|e| e.into_inner());
+        *active += 1;
+        Self(budget)
+    }
+}
+impl Drop for ParsePermit {
+    fn drop(&mut self) {
+        *self.0.active.lock().unwrap_or_else(|e| e.into_inner()) -= 1;
+        self.0.changed.notify_one();
+    }
+}
 
 /// Blocs retirés du texte indexable (métadonnées, navigation, scripts, pub…).
 static JUNK_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
@@ -63,33 +96,42 @@ static AD_TRACKER_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
         .collect()
 });
 
-static RE_COMMENT: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?is)<!--.*?-->").expect("comment regex"));
-static RE_EVENT_ATTR: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"(?is)\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)"#).expect("event"));
-static RE_STYLE_ATTR: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"(?is)\sstyle\s*=\s*("[^"]*"|'[^']*')"#).expect("style"));
-static RE_IMG_TAG: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?is)<img\b[^>]*>").expect("img"));
-static RE_IMG_SRC: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"(?is)\ssrc\s*=\s*"([^"]*)""#).expect("src dq"));
-static RE_IMG_SRC_SQ: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"(?is)\ssrc\s*=\s*'([^']*)'"#).expect("src sq"));
-static RE_SRCSET: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"(?is)\ssrcset\s*=\s*("[^"]*"|'[^']*')"#).expect("srcset"));
-static RE_ANCHOR: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"(?is)<a\b([^>]*)>"#).expect("a"));
-static RE_HREF: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"(?is)\shref\s*=\s*"([^"]*)""#).expect("href"));
-static RE_HREF_SQ: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"(?is)\shref\s*=\s*'([^']*)'"#).expect("href sq"));
+static RE_IMG_TAG: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?is)<img\b[^>]*>").expect("img"));
 static RE_WHITESPACE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\s+").expect("ws"));
 
 /// Paramètres de suivi retirés des URL.
 const TRACKING_PARAMS: &[&str] = &[
-    "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "utm_id", "utm_name",
-    "utm_reader", "utm_referrer", "fbclid", "gclid", "gclsrc", "dclid", "msclkid", "yclid",
-    "mc_cid", "mc_eid", "_ga", "_gl", "igshid", "ref_src", "ref_url", "spm", "scm", "affid",
-    "aff_id", "affiliate", "partner", "s_kwcid", "wickedid",
+    "utm_source",
+    "utm_medium",
+    "utm_campaign",
+    "utm_term",
+    "utm_content",
+    "utm_id",
+    "utm_name",
+    "utm_reader",
+    "utm_referrer",
+    "fbclid",
+    "gclid",
+    "gclsrc",
+    "dclid",
+    "msclkid",
+    "yclid",
+    "mc_cid",
+    "mc_eid",
+    "_ga",
+    "_gl",
+    "igshid",
+    "ref_src",
+    "ref_url",
+    "spm",
+    "scm",
+    "affid",
+    "aff_id",
+    "affiliate",
+    "partner",
+    "s_kwcid",
+    "wickedid",
 ];
 
 /// Supprime les paramètres de suivi/affiliation d'une URL.
@@ -162,7 +204,10 @@ pub fn extract_description(html: &str) -> Option<String> {
 }
 
 fn description_from(document: &Html) -> Option<String> {
-    for sel in ["meta[name='description']", "meta[property='og:description']"] {
+    for sel in [
+        "meta[name='description']",
+        "meta[property='og:description']",
+    ] {
         if let Ok(selector) = Selector::parse(sel)
             && let Some(el) = document.select(&selector).next()
             && let Some(content) = el.value().attr("content")
@@ -198,7 +243,7 @@ pub fn extract_favicon(html: &str, base: &Url) -> Option<String> {
 
 fn favicon_from(document: &Html, base: &Url) -> Option<String> {
     let selector = Selector::parse("link[rel*='icon']").expect("link icon");
-    for el in document.select(&selector) {
+    for el in document.select(&selector).take(2000) {
         if let Some(href) = el.value().attr("href")
             && let Some(abs) = absolutize(base, href)
         {
@@ -235,7 +280,11 @@ fn links_from(document: &Html, base: &Url) -> Vec<PageLink> {
             .map(|h| h != base_host)
             .unwrap_or(false);
         let anchor = collapse_whitespace(&el.text().collect::<String>());
-        let anchor = if anchor.is_empty() { None } else { Some(anchor) };
+        let anchor = if anchor.is_empty() {
+            None
+        } else {
+            Some(anchor)
+        };
         let safety = crate::safety::check_url(&url).verdict.as_str().to_string();
         links.push(PageLink {
             url,
@@ -257,7 +306,7 @@ fn images_from(document: &Html, base: &Url) -> Vec<PageImage> {
     let mut images = Vec::new();
     let mut seen = std::collections::HashSet::new();
 
-    for el in document.select(&selector) {
+    for el in document.select(&selector).take(500) {
         let src = el
             .value()
             .attr("src")
@@ -311,6 +360,8 @@ pub struct Parsed {
 /// passes restantes (texte indexable et HTML assaini) sont des passes sur le
 /// texte, bien moins coûteuses que des parses répétés.
 pub fn analyze(html: &str, base: &Url) -> Parsed {
+    // Network concurrency must not become 64 simultaneous, memory-heavy DOM trees.
+    let _permit = ParsePermit::acquire();
     let document = Html::parse_document(html);
     Parsed {
         title: title_from(&document),
@@ -336,15 +387,7 @@ pub fn extract_text(html: &str) -> String {
     collapse_whitespace(&text)
 }
 
-static RE_IMG_ALT: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"(?is)\salt\s*=\s*"([^"]*)""#).expect("alt dq"));
-static RE_IMG_ALT_SQ: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"(?is)\salt\s*=\s*'([^']*)'"#).expect("alt sq"));
-static RE_DOCTYPE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?is)<!doctype[^>]*>").expect("doctype"));
-static RE_HTML_TAGS: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?is)</?html\b[^>]*>|</?body\b[^>]*>|<head\b[^>]*>.*?</head>").expect("html tags"));
-
-/// Taille maximale du HTML assaini conservé (en octets) pour la visionneuse.
+/// Maximum sanitized HTML stored for the reader.
 pub const MAX_SANITIZED_HTML: usize = 1_500_000;
 
 fn html_escape_attr(value: &str) -> String {
@@ -355,66 +398,123 @@ fn html_escape_attr(value: &str) -> String {
         .replace('>', "&gt;")
 }
 
-fn first_capture(tag: &str, dq: &Regex, sq: &Regex) -> Option<String> {
-    dq.captures(tag)
-        .and_then(|c| c.get(1))
-        .map(|m| m.as_str().to_string())
-        .or_else(|| sq.captures(tag).and_then(|c| c.get(1)).map(|m| m.as_str().to_string()))
-}
-
-/// Produit un HTML assaini, sans scripts, iframes, trackers, publicités,
-/// pixels espions ni paramètres d'affiliation.
-///
-/// Les liens et images sont réécrits en URL absolues ; les liens externes
-/// s'ouvrent avec `rel="noopener noreferrer"` et les images ne transmettent
-/// pas de referer.
+/// Parses untrusted HTML with an allowlist. Images stay inert until proxied.
 pub fn sanitize_html(html: &str, base: &Url) -> String {
-    let mut out = RE_DOCTYPE.replace_all(html, "").to_string();
-    out = RE_COMMENT.replace_all(&out, "").to_string();
-    out = RE_HTML_TAGS.replace_all(&out, "").to_string();
+    use std::borrow::Cow;
+    use std::collections::HashSet;
+    let tags: HashSet<&str> = [
+        "a",
+        "abbr",
+        "article",
+        "b",
+        "blockquote",
+        "br",
+        "caption",
+        "code",
+        "dd",
+        "del",
+        "details",
+        "div",
+        "dl",
+        "dt",
+        "em",
+        "figcaption",
+        "figure",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "hr",
+        "i",
+        "img",
+        "kbd",
+        "li",
+        "main",
+        "ol",
+        "p",
+        "pre",
+        "s",
+        "section",
+        "small",
+        "span",
+        "strong",
+        "sub",
+        "summary",
+        "sup",
+        "table",
+        "tbody",
+        "td",
+        "th",
+        "thead",
+        "tr",
+        "ul",
+    ]
+    .into_iter()
+    .collect();
+    let mut filtered = html.to_string();
     for re in AD_TRACKER_PATTERNS.iter() {
-        out = re.replace_all(&out, "").to_string();
+        filtered = re.replace_all(&filtered, "").into_owned();
     }
-    out = RE_EVENT_ATTR.replace_all(&out, "").to_string();
-    out = RE_STYLE_ATTR.replace_all(&out, "").to_string();
-
-    out = RE_IMG_TAG
-        .replace_all(&out, |caps: &regex::Captures| -> String {
-            let tag = caps.get(0).map(|m| m.as_str()).unwrap_or("");
-            let src = first_capture(tag, &RE_IMG_SRC, &RE_IMG_SRC_SQ);
-            let alt = first_capture(tag, &RE_IMG_ALT, &RE_IMG_ALT_SQ).unwrap_or_default();
-            match src.and_then(|s| absolutize(base, &s)) {
-                Some(url) => format!(
-                    "<img src=\"{}\" alt=\"{}\" loading=\"lazy\" referrerpolicy=\"no-referrer\">",
-                    html_escape_attr(&url),
-                    html_escape_attr(&alt)
-                ),
-                None => String::new(),
+    let mut builder = ammonia::Builder::default();
+    let rewrite_base = base.clone();
+    builder
+        .tags(tags)
+        .generic_attributes(HashSet::new())
+        .add_tag_attributes("img", &["data-src"])
+        .add_clean_content_tags(&[
+            "iframe", "object", "embed", "svg", "math", "form", "template", "video", "audio",
+            "canvas",
+        ])
+        .link_rel(Some("noopener noreferrer"))
+        .set_tag_attribute_value("a", "target", "_blank")
+        .url_schemes(["http", "https"].into_iter().collect())
+        .url_relative(ammonia::UrlRelative::RewriteWithBase(base.clone()))
+        .attribute_filter(move |_, attr, value| {
+            if matches!(attr, "href" | "src" | "data-src") {
+                absolutize(&rewrite_base, value)
+                    .filter(|url| crate::network::validate_url(url).is_ok())
+                    .map(Cow::Owned)
+            } else {
+                Some(Cow::Borrowed(value))
             }
-        })
-        .to_string();
-
-    out = RE_SRCSET.replace_all(&out, "").to_string();
-
-    out = RE_ANCHOR
-        .replace_all(&out, |caps: &regex::Captures| -> String {
-            let tag = caps.get(0).map(|m| m.as_str()).unwrap_or("");
-            let href = first_capture(tag, &RE_HREF, &RE_HREF_SQ);
-            match href.and_then(|h| absolutize(base, &h)) {
-                Some(url) => format!(
-                    "<a href=\"{}\" target=\"_blank\" rel=\"noopener noreferrer\">",
-                    html_escape_attr(&url)
-                ),
-                None => "<a>".to_string(),
+        });
+    let clean = builder.clean(&filtered).to_string();
+    let mut out = RE_IMG_TAG
+        .replace_all(&clean, |caps: &regex::Captures| {
+            let fragment = Html::parse_fragment(&caps[0]);
+            let selector = Selector::parse("img").expect("img selector");
+            let Some(img) = fragment.select(&selector).next() else {
+                return String::new();
+            };
+            let Some(src) = img
+                .value()
+                .attr("src")
+                .or_else(|| img.value().attr("data-src"))
+            else {
+                return String::new();
+            };
+            if crate::network::validate_url(src).is_err() {
+                return String::new();
             }
+            let alt = img.value().attr("alt").unwrap_or("");
+            format!(
+                "<img data-src=\"{}\" alt=\"{}\" loading=\"lazy\" referrerpolicy=\"no-referrer\">",
+                html_escape_attr(src),
+                html_escape_attr(alt)
+            )
         })
-        .to_string();
-
+        .into_owned();
     if out.len() > MAX_SANITIZED_HTML {
-        // Tronque proprement (l'interface ajoute un avis de troncature).
         let mut cut = MAX_SANITIZED_HTML;
-        while cut > 0 && !out.is_char_boundary(cut) {
+        while !out.is_char_boundary(cut) {
             cut -= 1;
+        }
+        // Never leave a half-written tag at the truncation boundary.
+        let prefix = &out[..cut];
+        if prefix.rfind('<') > prefix.rfind('>') {
+            cut = prefix.rfind('<').unwrap_or(cut);
         }
         out.truncate(cut);
     }
@@ -425,13 +525,33 @@ pub fn sanitize_html(html: &str, base: &Url) -> String {
 mod tests {
     use super::*;
 
+    #[test]
+    fn reader_blocks_active_content_and_keeps_images_inert() {
+        let html = r#"<p style=background:url(https://evil.com)>Read</p><svg><a href='javascript:alert(1)'>x</a></svg><iframe src='https://evil.com'></iframe><img src=/pic.png?a=1&amp;b=2 onerror=alert(1)><a href='javascript&#58;alert(1)' ping='https://evil.com'>x</a>"#;
+        let clean = sanitize_html(html, &base());
+        for forbidden in [
+            "<svg",
+            "<iframe",
+            "style=",
+            "onerror",
+            "javascript",
+            "ping=",
+            "<img src=",
+        ] {
+            assert!(!clean.contains(forbidden), "{clean}");
+        }
+        assert!(clean.contains("data-src=\"https://example.com/pic.png?a=1&amp;b=2\""));
+        assert_eq!(sanitize_html(&clean, &base()), clean);
+    }
+
     fn base() -> Url {
         Url::parse("https://example.com/a/b/").unwrap()
     }
 
     #[test]
     fn extracts_and_absolutizes_links() {
-        let html = r#"<a href="../guide?utm_source=x&id=7">Guide</a><a href="javascript:void(0)">x</a>"#;
+        let html =
+            r#"<a href="../guide?utm_source=x&id=7">Guide</a><a href="javascript:void(0)">x</a>"#;
         let links = extract_links(html, &base());
         assert_eq!(links.len(), 1);
         assert_eq!(links[0].url, "https://example.com/a/guide?id=7");
@@ -461,6 +581,7 @@ mod tests {
         assert!(!clean.contains("ads-banner"));
         assert!(!clean.contains("onclick"));
         assert!(!clean.contains("srcset"));
+        assert!(clean.contains("target=\"_blank\""));
         assert!(clean.contains("https://example.com/x.png"));
         // `/next` est un chemin absolu : il se résout à la racine du domaine.
         assert!(clean.contains("https://example.com/next"));
@@ -475,5 +596,34 @@ mod tests {
         assert!(q.contains("id=9"));
         assert!(!q.contains("affid"));
         assert!(!q.contains("fbclid"));
+    }
+
+    #[test]
+    fn heavy_parsing_concurrency_is_bounded_and_permits_are_released() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::{Arc, Barrier};
+        let active = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+        let start = Arc::new(Barrier::new(8));
+        let handles = (0..8)
+            .map(|_| {
+                let active = active.clone();
+                let peak = peak.clone();
+                let start = start.clone();
+                std::thread::spawn(move || {
+                    start.wait();
+                    let _permit = ParsePermit::acquire();
+                    let count = active.fetch_add(1, Ordering::SeqCst) + 1;
+                    peak.fetch_max(count, Ordering::SeqCst);
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                    active.fetch_sub(1, Ordering::SeqCst);
+                })
+            })
+            .collect::<Vec<_>>();
+        for handle in handles {
+            handle.join().unwrap();
+        }
+        assert_eq!(active.load(Ordering::SeqCst), 0);
+        assert!(peak.load(Ordering::SeqCst) <= PARSE_BUDGET.limit);
     }
 }

@@ -150,7 +150,11 @@ fn seed_defaults(conn: &Connection) -> Result<()> {
     )?;
     for (slug, name, description) in [
         ("annonces", "Annonces", "Nouveautés de Vertex"),
-        ("idees", "Idées & suggestions", "Proposez des fonctionnalités"),
+        (
+            "idees",
+            "Idées & suggestions",
+            "Proposez des fonctionnalités",
+        ),
         ("bugs", "Bugs", "Signalez un problème"),
         ("discussion", "Discussion", "Tout et rien"),
     ] {
@@ -257,7 +261,10 @@ pub fn delete_session(conn: &Connection, token: &str) -> Result<()> {
 
 /// Supprime les sessions expirées.
 pub fn purge_sessions(conn: &Connection) -> Result<usize> {
-    Ok(conn.execute("DELETE FROM sessions WHERE expires_at <= datetime('now')", [])?)
+    conn.execute(
+        "DELETE FROM sessions WHERE expires_at <= datetime('now')",
+        [],
+    )
 }
 
 /// Nombre de comptes (sert de seuil pour l'ouverture des avis).
@@ -415,8 +422,10 @@ pub fn list_categories(conn: &Connection) -> Result<Vec<Category>> {
 
 /// Identifiant d'une catégorie à partir de son slug.
 pub fn category_id(conn: &Connection, slug: &str) -> Result<Option<i64>> {
-    conn.query_row("SELECT id FROM categories WHERE slug = ?1", [slug], |r| r.get(0))
-        .optional()
+    conn.query_row("SELECT id FROM categories WHERE slug = ?1", [slug], |r| {
+        r.get(0)
+    })
+    .optional()
 }
 
 /// Sujets d'une catégorie (les plus récents d'abord).
@@ -468,8 +477,10 @@ pub fn topic_header(conn: &Connection, topic_id: i64) -> Result<Option<(String, 
 
 /// Corps initial d'un sujet.
 pub fn topic_body(conn: &Connection, topic_id: i64) -> Result<Option<String>> {
-    conn.query_row("SELECT body FROM topics WHERE id = ?1", [topic_id], |r| r.get(0))
-        .optional()
+    conn.query_row("SELECT body FROM topics WHERE id = ?1", [topic_id], |r| {
+        r.get(0)
+    })
+    .optional()
 }
 
 /// Réponses d'un sujet.

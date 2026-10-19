@@ -10,7 +10,10 @@
 
 pub mod crawler;
 pub mod database;
+mod frontier;
 pub mod models;
+pub mod monitor;
+pub mod network;
 pub mod parser;
 pub mod robots;
 pub mod runner;
