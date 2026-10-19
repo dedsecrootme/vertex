@@ -1,0 +1,10 @@
+.git
+.vercel
+test-results/
+.wrangler
+worker.mjs
+wrangler.jsonc
+.env*
+public/downloads/
+public/vertex-chrome.png
+public/preview.png

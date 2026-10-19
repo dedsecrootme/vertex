@@ -1,0 +1,68 @@
+name: Rust Checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          components: rustfmt, clippy
+      - name: Workspace Formatting
+        run: cargo fmt --all -- --check
+      - name: Desktop Formatting
+        run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml -- --check
+      - name: Tests
+        run: cargo test --workspace --locked
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+      - name: API Build
+        run: cargo build -p api-rs --locked
+      - name: API Smoke
+        run: node tests/api-smoke.mjs
+      - name: Public API Smoke
+        run: node tests/api-smoke.mjs --public
+      - name: Browser Dependencies
+        run: npm ci --ignore-scripts
+      - name: JavaScript Checks
+        run: npm run lint:js
+      - name: HTML Checks
+        run: npm run lint:html
+      - name: Source Inventory
+        run: npm run audit:project
+      - name: JavaScript Dependency Audit
+        run: npm audit --audit-level=low
+      - name: Cleanup and Worker Tests
+        run: npm run test:unit
+      - name: Cloudflare Worker Tests
+        run: npm run test:cloudflare
+      - name: Cloudflare Package Check
+        run: npm run cloudflare:check
+      - name: Chromium
+        run: npx playwright install chromium
+      - name: Browser Tests
+        run: npm run test:web
+      - name: Lints
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Desktop
+        run: cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets --locked -- -D warnings
+      - name: Install Audit Tool
+        run: cargo install cargo-audit --locked
+      - name: Workspace Dependency Audit
+        run: cargo audit
+      - name: Desktop Dependency Audit
+        run: cargo audit --file apps/desktop/src-tauri/Cargo.lock

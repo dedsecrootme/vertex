@@ -1,0 +1,11 @@
+[package]
+name = "vx-mail"
+version = "0.1.0"
+edition = "2024"
+
+# vx-mail — messagerie **maison** de Vertex.
+#
+# * Helpers base64 (bibliotheque maintenue) et quoted-printable ;
+# * a venir : en-tetes, multipart, composition et transport IMAP/SMTP.
+[dependencies]
+base64 = "0.22"

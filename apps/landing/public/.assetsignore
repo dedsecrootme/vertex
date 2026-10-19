@@ -1,0 +1,6 @@
+downloads/**
+**/*.exe
+**/*.msi
+**/*.zip
+**/*.map
+vertex-chrome.png

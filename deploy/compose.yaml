@@ -1,0 +1,69 @@
+name: vertex
+services:
+  api:
+    image: vertex-server:local
+    build:
+      context: ..
+      dockerfile: deploy/Containerfile
+    restart: unless-stopped
+    environment:
+      VERTEX_DB_DIR: /data
+      VERTEX_BIND_HOST: 0.0.0.0
+      VERTEX_PORT: 3000
+      VERTEX_PUBLIC_ORIGIN: https://${VERTEX_HOST:?Define VERTEX_HOST}
+      VERTEX_ADMIN_TOKEN: ${VERTEX_ADMIN_TOKEN:?Define VERTEX_ADMIN_TOKEN}
+      VERTEX_ALLOW_DISCOVERY: 1
+      VERTEX_HOST: ${VERTEX_HOST}
+    volumes: [index:/data]
+    expose: [3000]
+    read_only: true
+    tmpfs: [/tmp:size=64m]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 512m
+    cpus: 1
+    healthcheck:
+      test: [CMD-SHELL, 'curl -fsS -H "Host: $$VERTEX_HOST" http://127.0.0.1:3000/health > /dev/null']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    logging:
+      options: {max-size: 10m, max-file: "3"}
+  crawler:
+    image: vertex-server:local
+    command: [vertex-crawler, --continuous]
+    restart: unless-stopped
+    environment:
+      VERTEX_DB_DIR: /data
+    volumes: [index:/data]
+    depends_on:
+      api: {condition: service_healthy}
+    read_only: true
+    tmpfs: [/tmp:size=64m]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 1g
+    cpus: 1
+    stop_grace_period: 45s
+    logging:
+      options: {max-size: 10m, max-file: "3"}
+  https:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports: ["80:80", "443:443", "443:443/udp"]
+    environment:
+      VERTEX_HOST: ${VERTEX_HOST}
+    volumes:
+      - ./Caddy.container:/etc/caddy/Caddyfile:ro
+      - certificates:/data
+      - caddy_config:/config
+    depends_on:
+      api: {condition: service_healthy}
+    mem_limit: 256m
+    logging:
+      options: {max-size: 10m, max-file: "3"}
+volumes:
+  index:
+  certificates:
+  caddy_config:

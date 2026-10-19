@@ -1,0 +1,32 @@
+{
+  "name": "vertex-web-checks",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "lint:js": "eslint .",
+    "lint:html": "html-validate \"apps/web/*.html\" \"apps/landing/public/*.html\" \"apps/hub-rs/public/*.html\"",
+    "audit:project": "node scripts/audit-project.mjs",
+    "test:unit": "node --test tests/*.test.mjs",
+    "build:motion": "node scripts/build-motion.mjs",
+    "build:icons": "node scripts/build-icons.mjs",
+    "test:cloudflare": "node --test tests/cloudflare.test.mjs",
+    "cloudflare:check": "wrangler deploy --config apps/landing/wrangler.jsonc --dry-run",
+    "test:web": "playwright test",
+    "test:api": "node tests/api-smoke.mjs && node tests/api-smoke.mjs --public"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@playwright/test": "1.64.1",
+    "@xmldom/xmldom": "0.9.12",
+    "esbuild": "0.28.2",
+    "eslint": "10.13.0",
+    "globals": "17.13.0",
+    "html-validate": "11.16.4",
+    "lucide-static": "1.59.0",
+    "motion": "14.3.0",
+    "wrangler": "4.151.1"
+  }
+}
